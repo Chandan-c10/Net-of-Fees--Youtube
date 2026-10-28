@@ -21,13 +21,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from pipeline import config, logging_setup
-from pipeline.errors import GateError, PipelineError
+from pipeline import config, logging_setup, notify
+from pipeline.errors import ConfigError, GateError, PipelineError
 from pipeline.manifest import STAGES, Episode, Manifest
 from pipeline.recipes import available as available_recipes
 from pipeline.stages import (assemble, captions, charts, export, finish,
@@ -37,7 +38,17 @@ from pipeline.stages import (assemble, captions, charts, export, finish,
 import profiles
 
 
+# An episode id becomes a directory name, and since a scheduled run can
+# supply one from a workflow input, it is validated rather than trusted.
+EPISODE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
+
+
 def _episode(episode_id: str) -> Episode:
+    if not EPISODE_ID.match(episode_id):
+        raise ConfigError(
+            f"bad episode id {episode_id!r}: letters, digits, dash and "
+            "underscore only, up to 32 characters"
+        )
     return Episode(episode_id, config.EPISODES_DIR)
 
 
@@ -111,6 +122,9 @@ def _execute(ep: Episode, m: Manifest, name: str, settings, args, log) -> bool:
     except PipelineError as exc:
         m.mark_failed(name, str(exc))
         ep.save_manifest(m)
+        # Carry the location on the exception rather than mailing from here,
+        # so there is exactly one place that sends an alert.
+        exc.episode_id, exc.stage = m.id, name
         raise
     ep.save_manifest(m)
     return True
@@ -355,6 +369,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("list", help="list episodes").set_defaults(func=cmd_list)
     sub.add_parser("doctor", help="check the environment").set_defaults(func=cmd_doctor)
+    sub.add_parser("notify-test",
+                   help="send a test failure alert").set_defaults(func=cmd_notify_test)
     sub.add_parser("voices", help="list available voices").set_defaults(func=cmd_voices)
 
     st = sub.add_parser("status", help="show one episode")
@@ -364,12 +380,34 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def cmd_notify_test(args) -> int:
+    ok, detail = notify.test_channel()
+    print(f"\n  alerts: {'ok' if ok else 'not working'}  —  {detail}\n")
+    if not ok:
+        print("  Set SMTP_HOST, SMTP_USER, SMTP_APP_PASSWORD and ALERT_EMAIL")
+        print("  in .env. For Gmail, SMTP_APP_PASSWORD must be an app")
+        print("  password, not the account password.\n")
+    return 0 if ok else 1
+
+
+def _fail(exc: BaseException) -> int:
+    """Report a failure to the user, by mail if they configured it.
+
+    Alerting lives here because this is the only point both dispatch paths
+    pass through, and because a failure that never reached the user is the
+    one thing an unattended pipeline cannot afford.
+    """
+    notify.failure(getattr(exc, "episode_id", None), getattr(exc, "stage", None), exc)
+    print(f"\n  {type(exc).__name__}: {exc}\n", file=sys.stderr)
+    return getattr(exc, "exit_code", 1)
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
     # `run.py 001 ...` is the common path; route it without a subcommand.
     if argv and not argv[0].startswith("-") and argv[0] not in {
-        "new", "list", "status", "doctor", "voices"
+        "new", "list", "status", "doctor", "voices", "notify-test"
     }:
         rp = argparse.ArgumentParser(prog="run.py <id>")
         rp.add_argument("id")
@@ -399,8 +437,11 @@ def main(argv: list[str] | None = None) -> int:
         try:
             return cmd_status(args) if args.status else cmd_run(args)
         except PipelineError as exc:
-            print(f"\n  {type(exc).__name__}: {exc}\n", file=sys.stderr)
-            return exc.exit_code
+            return _fail(exc)
+        except Exception as exc:  # unexpected: alert, then let it surface
+            notify.failure(getattr(exc, "episode_id", None),
+                           getattr(exc, "stage", None), exc)
+            raise
 
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -410,8 +451,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return args.func(args)
     except PipelineError as exc:
-        print(f"\n  {type(exc).__name__}: {exc}\n", file=sys.stderr)
-        return exc.exit_code
+        return _fail(exc)
+    except Exception as exc:  # unexpected: alert, then let it surface
+        notify.failure(None, None, exc)
+        raise
 
 
 if __name__ == "__main__":

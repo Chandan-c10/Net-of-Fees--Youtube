@@ -1,0 +1,113 @@
+name: draft
+
+# Two drafts a day, each an hour ahead of its publish slot (08:30 and
+# 19:30 Asia/Kolkata, per pipeline/config.py), so there is time to review
+# before the slot arrives.
+#
+# This workflow deliberately stops at Gate 1. It prepares a script and
+# tells you it is waiting; it cannot approve or publish, because there is
+# no flag that skips a gate -- architecture doc, section 13.
+
+on:
+  schedule:
+    - cron: "0 2 * * *"   # 07:30 IST, ahead of the morning slot
+    - cron: "0 13 * * *"  # 18:30 IST, ahead of the evening slot
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Content profile"
+        required: false
+        default: engineering
+      recipe:
+        description: "Recipe to draft from"
+        required: false
+        default: incident_log
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    env:
+      PROFILE: ${{ inputs.profile || 'engineering' }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
+      ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Provide episode data
+        env:
+          INCIDENTS_JSON: ${{ secrets.INCIDENTS_JSON }}
+        run: |
+          # data/ is gitignored, so the source rows arrive as a secret.
+          # Absent, the recipe refuses rather than inventing a row.
+          if [ -n "$INCIDENTS_JSON" ]; then
+            mkdir -p data
+            printf '%s' "$INCIDENTS_JSON" > data/incidents.json
+          fi
+
+      - name: Choose an episode id
+        id: ep
+        run: |
+          # The id is derived, not auto-numbered: episodes/ is gitignored,
+          # so a CI runner always starts empty and `_next_id()` would hand
+          # out 001 twice a day, every day.
+          SLOT=$([ "$(date -u +%H)" -lt 8 ] && echo am || echo pm)
+          echo "id=$(date -u +%Y%m%d)-$SLOT" >> "$GITHUB_OUTPUT"
+
+      - name: Draft through Gate 1
+        id: draft
+        env:
+          ID: ${{ steps.ep.outputs.id }}
+        run: |
+          python run.py new --id "$ID" \
+            --profile "$PROFILE" \
+            --recipe "${{ inputs.recipe || 'incident_log' }}"
+          python run.py "$ID" --stage script
+          python run.py "$ID" --stage scrub
+          python run.py "$ID" --status
+
+      - name: Keep the draft
+        if: always() && steps.ep.outputs.id != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: draft-${{ steps.ep.outputs.id }}
+          path: episodes/${{ steps.ep.outputs.id }}/
+          retention-days: 14
+
+      - name: Say it is ready
+        if: success()
+        run: |
+          python - <<'PY'
+          import os
+          from pipeline import notify
+          ch = notify.Channel()
+          if not ch.configured:
+              print("alerts not configured; skipping")
+              raise SystemExit(0)
+          ep = "${{ steps.ep.outputs.id }}"
+          run = ("https://github.com/${{ github.repository }}/actions/runs/"
+                 "${{ github.run_id }}")
+          ch.send(
+              f"[net-of-fees] draft {ep} is waiting at Gate 1",
+              f"Episode {ep} drafted and passed the secret scan.\n\n"
+              f"Download it from the run artifacts:\n  {run}\n\n"
+              "Then, locally:\n"
+              f"  python run.py {ep} --status\n"
+              f"  python run.py {ep} --approve-script\n\n"
+              "Nothing renders or publishes until you clear the gate.",
+          )
+          print("notified", ch.to)
+          PY

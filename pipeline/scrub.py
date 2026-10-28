@@ -122,3 +122,16 @@ def assert_clean(paths: list[Path]) -> None:
 def scan_snapshot(data: object) -> list[Finding]:
     """Scan a parsed snapshot by serialising it back to text."""
     return scan_text(json.dumps(data, indent=2), origin="data.json")
+
+
+def censor(text: str) -> str:
+    """Replace every secret-looking run with a label naming what it was.
+
+    `_redact` shortens an excerpt for a finding report; this one rewrites
+    the text itself, so an alert body or a log line can carry a real error
+    message without carrying the credential that appeared inside it.
+    """
+    out = text
+    for name, pattern in PATTERNS:
+        out = pattern.sub(f"[redacted:{name}]", out)
+    return out

@@ -172,6 +172,61 @@ uploads a day.
 
 ---
 
+## Alerts
+
+The pipeline mails you when a stage fails, so an unattended run cannot
+fail quietly. Put four values in `.env`:
+
+```
+ALERT_EMAIL=you@example.com
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=you@example.com
+SMTP_APP_PASSWORD=...
+```
+
+For Gmail, `SMTP_APP_PASSWORD` must be an [app
+password](https://myaccount.google.com/apppasswords), not your account
+password. Then prove it works before you need it:
+
+```
+python run.py notify-test
+```
+
+Leave the values unset and nothing mails — alerting is optional, and a
+dead mail server never turns into a failed render. A broken alert is
+logged as a warning and the original error still reaches you on screen.
+
+## Scheduling
+
+`.github/workflows/draft.yml` runs twice a day, an hour before each
+publish slot, and does everything up to Gate 1: it creates an episode,
+writes the script, runs the secret scan, uploads the result as a run
+artifact, and mails you that a draft is waiting.
+
+It stops there by design. There is no flag that skips a gate, so the
+schedule can prepare work but never publish it. You download the draft,
+review the script, and clear the gate yourself:
+
+```
+python run.py 20261028-am --approve-script
+```
+
+Two repository secrets make the schedule useful — `Settings → Secrets
+and variables → Actions`:
+
+| Secret | Why |
+|---|---|
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_APP_PASSWORD`, `ALERT_EMAIL` | so the draft can tell you it is ready |
+| `INCIDENTS_JSON` | the source rows; `data/` is gitignored, so they cannot come from the repo |
+
+Without `INCIDENTS_JSON` the recipe refuses to draft rather than invent
+an incident, and the run fails loudly.
+
+`.github/workflows/tests.yml` runs the suite on every push across
+Windows and Linux on Python 3.11 and 3.12, because binary discovery,
+font paths and concat-list quoting all differ by platform.
+
 ## Layout
 
 ```

@@ -66,3 +66,28 @@ def test_there_is_no_gate_skip_flag():
     parser_src = __import__("inspect").getsource(run.main)
     assert "skip-gate" not in parser_src
     assert "skip_gate" not in parser_src
+
+
+# ---- episode id validation -------------------------------------------
+# A scheduled run supplies the id from a workflow input, so it reaches a
+# filesystem path from outside the repo.
+
+import pytest as _pytest
+
+from pipeline.errors import ConfigError as _ConfigError
+
+import run as _run
+
+
+@_pytest.mark.parametrize("bad", [
+    "../etc", "a/b", "a\\b", "with space", "x$y", "", "." , "..",
+    "x" * 33, "-leading-dash",
+])
+def test_a_dangerous_episode_id_is_refused(bad):
+    with _pytest.raises(_ConfigError):
+        _run._episode(bad)
+
+
+@_pytest.mark.parametrize("good", ["001", "20261028-am", "ep_7", "A1"])
+def test_a_reasonable_episode_id_is_accepted(good):
+    assert _run._episode(good).dir.name == good
