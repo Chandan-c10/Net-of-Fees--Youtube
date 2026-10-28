@@ -135,26 +135,45 @@ class KokoroVoice:
         self._pipeline = KPipeline(lang_code=self.lang_code)
         return self._pipeline
 
+    def _render_beat(self, pipeline, text: str, speed: float):
+        """One beat at its own speed."""
+        import numpy as np
+
+        chunks = [audio for _gs, _ps, audio in
+                  pipeline(text, voice=self.voice, speed=speed)]
+        if not chunks:
+            raise StageError(f"Kokoro produced no audio for {text[:40]!r}")
+        return np.concatenate(chunks)
+
     def speak(self, text: str, out_path: Path) -> VoiceResult:
         from ..pacing import scene_padding
+        from . import delivery
 
         self._scene += 1
         pipeline = self._get_pipeline()   # checks every dependency first
         import numpy as np
         import soundfile as sf
 
-        chunks = [
-            audio for _gs, _ps, audio in
-            pipeline(text, voice=self.voice, speed=self.speed)
-        ]
-        if not chunks:
-            raise StageError(f"Kokoro produced no audio for scene {self._scene}")
-        samples = np.concatenate(chunks)
+        # Beat by beat rather than a paragraph at a time: the pauses then
+        # land where a person would breathe, and the beat carrying the
+        # number can slow down for it. See delivery.py.
+        beats = delivery.plan(text, self._scene, self.episode_id)
+        if not beats:
+            raise StageError(f"nothing to narrate in scene {self._scene}")
+        seed = f"{self.episode_id}:{self._scene}"
+        segments = [self._render_beat(pipeline, b.text, b.speed * self.speed)
+                    for b in beats]
+        samples = delivery.stitch(segments, beats, seed, SAMPLE_RATE)
 
         # Pause is baked into this scene's file so the measured duration
         # includes it, keeping the timing contract in section 5a intact.
+        # Room tone rather than zeros, for the same reason as between
+        # beats: a floor that drops to nothing is heard as a cut.
         pad = scene_padding(text, self._scene, self.episode_id)
-        samples = np.concatenate([samples, np.zeros(int(pad * SAMPLE_RATE))])
+        samples = np.concatenate([
+            samples,
+            delivery.room_tone(int(pad * SAMPLE_RATE), f"{seed}:tail"),
+        ])
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
         sf.write(str(out_path), samples, SAMPLE_RATE, subtype="PCM_16")
@@ -164,3 +183,11 @@ class KokoroVoice:
             engine=f"kokoro:{self.voice}",
             draft=False,
         )
+
+    def delivery_plan(self, text: str, scene_index: int = 0) -> list:
+        """The read this engine would produce, without synthesising it.
+
+        Lets the beats be inspected and tested with no model installed.
+        """
+        from . import delivery
+        return delivery.plan(text, scene_index, self.episode_id)
