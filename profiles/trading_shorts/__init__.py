@@ -12,3 +12,7 @@ from . import visuals
 __all__ = ["style", "visuals"]
 PROFILE_NAME = "trading_shorts"
 DEFAULT_VOICE = "chandan_en"
+HASHTAGS = (
+    "#optionstrading", "#fno", "#nifty", "#tradingcosts",
+    "#stockmarketindia", "#tradingeducation",
+)
