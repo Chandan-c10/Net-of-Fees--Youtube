@@ -28,8 +28,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import profiles
-from pipeline import config, logging_setup, notify
-from pipeline.errors import ConfigError, GateError, PipelineError
+from pipeline import config, dashboard, gates, logging_setup, notify
+from pipeline.errors import ConfigError, PipelineError
 from pipeline.manifest import PUBLISH_STAGES, STAGES, Episode, Manifest
 from pipeline.recipes import available as available_recipes
 from pipeline.stages import (
@@ -210,44 +210,15 @@ def cmd_run(args) -> int:
 
 
 def _approve_gate_1(ep: Episode, m: Manifest, log) -> int:
-    """Gate 1. Enforced here, not merely displayed."""
-    if not m.is_done("script"):
-        raise GateError("the script stage is not complete")
-    if not m.is_done("scrub"):
-        raise GateError("the scrub stage has not passed")
-    flagged = [s.index for s in m.scenes if s.flagged]
-    if flagged:
-        raise GateError(f"scenes still flagged: {flagged}")
-
-    data = json.loads(ep.snapshot.read_text(encoding="utf-8"))
-    from pipeline.script_format import validate_against_snapshot
-    validate_against_snapshot(m.scenes, data, profiles.load(m.profile))
-
-    m.pass_gate_1()
-    ep.save_manifest(m)
-    log.info("gate 1 cleared")
+    """Gate 1. Enforced in pipeline.gates, which the dashboard shares."""
+    gates.approve_gate_1(ep, m)
     print(f"Gate 1 cleared. Next:  python run.py {m.id}")
     return 0
 
 
 def _approve_gate_2(ep: Episode, m: Manifest, log) -> int:
-    """Gate 2. The upload stage independently refuses a null approved_at."""
-    for required in ("assemble", "metadata", "thumbnail"):
-        if not m.is_done(required):
-            raise GateError(f"{required} is not complete")
-    if not m.gate_1_passed_at:
-        raise GateError("gate 1 was never cleared")
-    if m.stage("scrub").data.get("findings"):
-        raise GateError("scrub reported findings")
-    if m.stage("voice").data.get("draft"):
-        raise GateError(
-            "this episode was narrated with the draft voice engine. "
-            "Re-run `--stage voice --force` with a real engine before approving."
-        )
-
-    m.pass_gate_2()
-    ep.save_manifest(m)
-    log.info("gate 2 cleared")
+    """Gate 2. The upload stage independently re-checks approved_at."""
+    gates.approve_gate_2(ep, m)
     print(f"Gate 2 cleared. Next:  python run.py {m.id} --publish")
     print("           (add --no-instagram for YouTube only)")
     return 0
@@ -387,6 +358,16 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("doctor", help="check the environment").set_defaults(func=cmd_doctor)
     sub.add_parser("notify-test",
                    help="send a test failure alert").set_defaults(func=cmd_notify_test)
+
+    dash = sub.add_parser("dashboard", help="serve the gate review panel")
+    dash.add_argument("--host", default="127.0.0.1",
+                      help="127.0.0.1 (default) needs no token; anything "
+                           "else requires one")
+    dash.add_argument("--port", type=int, default=8765)
+    dash.add_argument("--token", nargs="?", const="", default=None,
+                      help="--token alone generates one; or pass a value")
+    dash.add_argument("-v", "--verbose", action="store_true")
+    dash.set_defaults(func=cmd_dashboard)
     sub.add_parser("voices", help="list available voices").set_defaults(func=cmd_voices)
 
     st = sub.add_parser("status", help="show one episode")
@@ -394,6 +375,16 @@ def build_parser() -> argparse.ArgumentParser:
     st.set_defaults(func=cmd_status)
 
     return p
+
+
+def cmd_dashboard(args) -> int:
+    """Serve the gate review panel."""
+    logging_setup.configure(None, args.verbose)
+    token = args.token or dashboard.token_from_env()
+    if args.token == "":          # --token with no value: generate one
+        token = dashboard.new_token()
+    dashboard.serve(host=args.host, port=args.port, token=token)
+    return 0
 
 
 def cmd_notify_test(args) -> int:
@@ -423,7 +414,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # `run.py 001 ...` is the common path; route it without a subcommand.
     if argv and not argv[0].startswith("-") and argv[0] not in {
-        "new", "list", "status", "doctor", "voices", "notify-test"
+        "new", "list", "status", "doctor", "voices", "notify-test",
+        "dashboard"
     }:
         rp = argparse.ArgumentParser(prog="run.py <id>")
         rp.add_argument("id")

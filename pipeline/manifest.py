@@ -89,6 +89,7 @@ class Manifest:
     approved_at: str | None = None
     published_at: str | None = None
     snapshot_sha256: str | None = None
+    chosen_thumbnail: int | None = None
     platform_posts: list[dict[str, Any]] = field(default_factory=list)
 
     # ---- construction -------------------------------------------------

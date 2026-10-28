@@ -220,6 +220,56 @@ neither is a prerequisite for the other. Both go through the same
 `assert_publishable`, so a second platform is not a way around Gate 2.
 Instagram allows 50 posts per 24 hours.
 
+## The control panel
+
+Everything except recording your voice can be driven from a browser:
+
+```
+python run.py dashboard
+```
+
+It prints a link. Open it.
+
+| Page | What you can do |
+|---|---|
+| Episodes | see every episode and its stages; create a new one from a profile and recipe |
+| Episode | run the pipeline or re-run one stage, with the live log |
+| Gate 1 | read each scene beside its chart, hear its narration, flag a scene you dislike, approve the script |
+| Gate 2 | watch the video, pick the thumbnail, pick the title, read the exact description, tags and Instagram caption, preview all five vertical cuts and the captions, approve for publishing |
+| Publish | dry run, or post to YouTube, Instagram, or both; see what went where |
+| System | FFmpeg, GPU, fonts, which credentials are in place; send a test alert |
+
+**It cannot do anything the CLI would refuse.** The gate conditions live
+in `pipeline/gates.py` and both the panel and the CLI call it, because a
+gate implemented twice is a gate that will eventually disagree with
+itself. Stages run by spawning `run.py`, so the panel takes the same path
+a terminal does and a crashed render cannot take the panel down with it.
+
+Only a generated title candidate can be chosen, never free text: the
+candidates are the ones checked for advisory language.
+
+### Reaching it from your phone
+
+The panel binds to `127.0.0.1`, so nothing outside the machine can reach
+it and no password is needed. To use it from your phone on the same wifi:
+
+```
+python run.py dashboard --host 0.0.0.0 --token
+```
+
+`--token` with no value generates one and prints it inside the link. **It
+refuses to start on a non-local address without one**, because this panel
+can publish to your channel — an open port on a cafe network is someone
+else publishing to it. The link carries the token, so there is still no
+sign-in; treat the link like a password. `DASHBOARD_TOKEN` in `.env`
+keeps the same one across restarts.
+
+Other protections: mutations are POST only and are refused when the
+request comes from another site, so a link pasted into a chat app cannot
+approve an episode. Publishing for real needs a typed confirmation.
+Assets are served only from inside the episode directory, and only
+images, video, audio and captions — never a manifest or a token file.
+
 ## Alerts
 
 The pipeline mails you when a stage fails, so an unattended run cannot

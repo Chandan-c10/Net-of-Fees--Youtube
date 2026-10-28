@@ -135,6 +135,31 @@ def _client():
     return build("youtube", "v3", credentials=creds, cache_discovery=False)
 
 
+def _set_thumbnail(youtube, ep: Episode, m: Manifest, video_id: str, log) -> None:
+    """Attach the thumbnail the operator chose at Gate 2.
+
+    Runs after the insert succeeded. A thumbnail that fails to attach is
+    worth a warning, not an exception: the video is already live, and
+    raising here would make a published episode look like a failed one.
+    """
+    if m.chosen_thumbnail is None:
+        log.info("no thumbnail chosen; YouTube will auto-generate one")
+        return
+    path = ep.thumbnail(m.chosen_thumbnail)
+    if not path.exists():
+        log.warning(f"chosen thumbnail {path.name} is missing; skipping")
+        return
+    try:
+        from googleapiclient.http import MediaFileUpload
+        youtube.thumbnails().set(
+            videoId=video_id,
+            media_body=MediaFileUpload(str(path), mimetype="image/png"),
+        ).execute()
+        log.info(f"thumbnail set from {path.name}")
+    except Exception as exc:
+        log.warning(f"could not set the thumbnail: {exc}")
+
+
 def run(ep: Episode, m: Manifest, dry_run: bool = False,
         privacy: str = "private") -> None:
     """Upload the long-form. Shorts publish through the same path, per slot."""
@@ -204,6 +229,7 @@ def run(ep: Episode, m: Manifest, dry_run: bool = False,
         raise StageError(f"upload failed: {exc}") from exc
 
     video_id = response["id"]
+    _set_thumbnail(youtube, ep, m, video_id, log)
     row.update(status="posted", external_id=video_id, posted_at=_now())
     m.published_at = row["posted_at"]
     m.mark_done("upload", video_id=video_id, privacy=privacy)
