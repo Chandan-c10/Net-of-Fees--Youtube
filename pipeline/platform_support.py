@@ -188,6 +188,14 @@ def detect_device() -> Device:
     return Device("cpu", f"{os.cpu_count()} cores")
 
 
+def _describe_binary(name: str, env_var: str) -> str:
+    """What find_binary would return, or why it would fail."""
+    try:
+        return find_binary(name, env_var)
+    except ConfigError as exc:
+        return f"MISSING ({exc})"
+
+
 def describe_environment() -> dict[str, object]:
     """Everything a bug report needs about the host."""
     device = detect_device()
@@ -195,8 +203,11 @@ def describe_environment() -> dict[str, object]:
     return {
         "os": os_name(),
         "python": sys.version.split()[0],
-        "ffmpeg": shutil.which("ffmpeg") or os.getenv("FFMPEG_BIN") or "MISSING",
-        "ffprobe": shutil.which("ffprobe") or os.getenv("FFPROBE_BIN") or "MISSING",
+        # Via find_binary, not shutil.which: the override wins there, so
+        # resolving it differently here would report one binary while the
+        # render used another.
+        "ffmpeg": _describe_binary("ffmpeg", "FFMPEG_BIN"),
+        "ffprobe": _describe_binary("ffprobe", "FFPROBE_BIN"),
         "device": f"{device.kind} ({device.detail})",
         "thumbnail_font": str(font) if font else "built-in bitmap fallback",
     }

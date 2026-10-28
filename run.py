@@ -29,11 +29,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from pipeline import config, logging_setup, notify
 from pipeline.errors import ConfigError, GateError, PipelineError
-from pipeline.manifest import STAGES, Episode, Manifest
+from pipeline.manifest import PUBLISH_STAGES, STAGES, Episode, Manifest
 from pipeline.recipes import available as available_recipes
 from pipeline.stages import (assemble, captions, charts, export, finish,
-                             metadata, script_gen, shorts, thumbnail,
-                             upload, voice)
+                             instagram, metadata, script_gen, shorts,
+                             thumbnail, upload, voice)
 
 import profiles
 
@@ -95,6 +95,8 @@ def _run_stage(name: str, ep: Episode, m: Manifest, settings, args) -> None:
         shorts.run(ep, m, profile)
     elif name == "upload":
         upload.run(ep, m, dry_run=args.dry_run)
+    elif name == "instagram":
+        instagram.run(ep, m, dry_run=args.dry_run, which=args.reel)
     else:
         raise PipelineError(f"no dispatch for stage {name!r}")
 
@@ -179,12 +181,14 @@ def cmd_run(args) -> int:
     if args.stage:
         todo = [args.stage]
     elif args.publish:
-        todo = ["upload"]
+        todo = ["instagram"] if args.instagram else list(PUBLISH_STAGES)
+        if args.no_instagram:
+            todo = [s for s in todo if s != "instagram"]
     else:
         start = STAGES.index(args.start) if args.start else 0
         todo = list(STAGES[start:])
         if not args.through_upload:
-            todo = [s for s in todo if s != "upload"]
+            todo = [s for s in todo if s not in PUBLISH_STAGES]
 
     for name in todo:
         if not _execute(ep, m, name, settings, args, log):
@@ -233,6 +237,7 @@ def _approve_gate_2(ep: Episode, m: Manifest, log) -> int:
     ep.save_manifest(m)
     log.info("gate 2 cleared")
     print(f"Gate 2 cleared. Next:  python run.py {m.id} --publish")
+    print("           (add --no-instagram for YouTube only)")
     return 0
 
 
@@ -417,6 +422,12 @@ def main(argv: list[str] | None = None) -> int:
         rp.add_argument("--approve-script", action="store_true")
         rp.add_argument("--approve", action="store_true")
         rp.add_argument("--publish", action="store_true")
+        rp.add_argument("--instagram", action="store_true",
+                        help="with --publish, post the reel only")
+        rp.add_argument("--no-instagram", action="store_true",
+                        help="with --publish, skip Instagram")
+        rp.add_argument("--reel", type=int, default=1,
+                        help="which vertical cut to post (default 1)")
         rp.add_argument("--status", action="store_true")
         rp.add_argument("--dry-run", action="store_true")
         rp.add_argument("--through-upload", action="store_true")

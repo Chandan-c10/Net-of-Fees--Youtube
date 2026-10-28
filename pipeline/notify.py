@@ -39,25 +39,35 @@ class Channel:
         self.user = os.getenv("SMTP_USER")
         self.password = os.getenv("SMTP_APP_PASSWORD")
         self.to = os.getenv("ALERT_EMAIL")
+        # A relay on localhost commonly takes unauthenticated plaintext on
+        # 25. Default stays on, so the public-provider path is encrypted
+        # unless someone deliberately turns it off.
+        self.starttls = os.getenv("SMTP_STARTTLS", "1") not in ("0", "false", "no")
+
+    @property
+    def authenticating(self) -> bool:
+        return bool(self.user and self.password)
 
     @property
     def configured(self) -> bool:
-        return bool(self.host and self.user and self.password and self.to)
+        # A local relay needs no credentials, so host and recipient are the
+        # only hard requirements; a half-filled credential pair is not.
+        if not (self.host and self.to):
+            return False
+        return bool(self.user) == bool(self.password)
 
     def missing(self) -> list[str]:
-        names = {
-            "SMTP_HOST": self.host,
-            "SMTP_USER": self.user,
-            "SMTP_APP_PASSWORD": self.password,
-            "ALERT_EMAIL": self.to,
-        }
-        return [k for k, v in names.items() if not v]
+        names = {"SMTP_HOST": self.host, "ALERT_EMAIL": self.to}
+        gaps = [k for k, v in names.items() if not v]
+        if bool(self.user) != bool(self.password):
+            gaps.append("SMTP_USER and SMTP_APP_PASSWORD together")
+        return gaps
 
     def send(self, subject: str, body: str) -> None:
         """Deliver one message. Raises on failure; callers decide what that means."""
         msg = EmailMessage()
         msg["Subject"] = scrub.censor(subject)
-        msg["From"] = self.user
+        msg["From"] = self.user or f"net-of-fees@{self.host}"
         msg["To"] = self.to
         msg.set_content(scrub.censor(body))
 
@@ -66,9 +76,10 @@ class Channel:
         else:
             server = smtplib.SMTP(self.host, self.port, timeout=TIMEOUT_SEC)
         with server:
-            if self.port != IMPLICIT_TLS_PORT:
+            if self.port != IMPLICIT_TLS_PORT and self.starttls:
                 server.starttls()
-            server.login(self.user, self.password)
+            if self.authenticating:
+                server.login(self.user, self.password)
             server.send_message(msg)
 
 

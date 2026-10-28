@@ -39,7 +39,28 @@ def test_unconfigured_channel_names_what_is_missing(monkeypatch):
         monkeypatch.delenv(k, raising=False)
     ch = notify.Channel()
     assert not ch.configured
-    assert set(ch.missing()) == set(CREDS)
+    # Credentials are optional: a local relay needs neither.
+    assert set(ch.missing()) == {"SMTP_HOST", "ALERT_EMAIL"}
+
+
+def test_half_a_credential_pair_is_refused(monkeypatch):
+    """A user part with no password is a typo, not a local relay."""
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("ALERT_EMAIL", "me@example.com")
+    monkeypatch.setenv("SMTP_USER", "me@example.com")
+    monkeypatch.delenv("SMTP_APP_PASSWORD", raising=False)
+    ch = notify.Channel()
+    assert not ch.configured
+    assert any("together" in g for g in ch.missing())
+
+
+def test_an_unauthenticated_relay_is_configured(monkeypatch):
+    for k in CREDS:
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("SMTP_HOST", "127.0.0.1")
+    monkeypatch.setenv("ALERT_EMAIL", "ops@example.com")
+    ch = notify.Channel()
+    assert ch.configured and not ch.authenticating
 
 
 def test_configured_channel_is_complete(configured):

@@ -28,12 +28,18 @@ STAGES: tuple[str, ...] = (
     "thumbnail",
     "shorts",
     "upload",
+    "instagram",
 )
 
 # Stages that may not run until the named gate has been cleared.
 GATE_1_STAGES = ("voice", "charts", "captions", "assemble",
                  "metadata", "thumbnail")
-GATE_2_STAGES = ("shorts", "upload")
+GATE_2_STAGES = ("shorts", "upload", "instagram")
+
+# Publish targets are siblings, not a sequence. A reel does not need the
+# YouTube upload to have gone out first, and either may be skipped
+# entirely, so they are exempt from each other's prerequisites.
+PUBLISH_STAGES = ("upload", "instagram")
 
 
 def _utcnow() -> str:
@@ -177,7 +183,10 @@ class Manifest:
         """Stages before `name` that are not done."""
         if name not in STAGES:
             raise ManifestError(f"unknown stage {name!r}")
-        return [s for s in STAGES[: STAGES.index(name)] if not self.is_done(s)]
+        before = STAGES[: STAGES.index(name)]
+        if name in PUBLISH_STAGES:
+            before = tuple(s for s in before if s not in PUBLISH_STAGES)
+        return [s for s in before if not self.is_done(s)]
 
     # ---- gates ---------------------------------------------------------
 

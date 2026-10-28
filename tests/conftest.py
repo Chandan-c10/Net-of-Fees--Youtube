@@ -62,3 +62,31 @@ def episode(episode_dir: Path, manifest: Manifest, fixture_snapshot: dict) -> Ep
     manifest.mark_done("scrub", findings=0)
     ep.save_manifest(manifest)
     return ep
+
+
+@pytest.fixture(scope="session")
+def rendered_reel(tmp_path_factory) -> Path:
+    """A real 9:16 H.264/AAC clip, rendered once per session.
+
+    The Instagram stage runs ffprobe on whatever it is about to upload, so
+    a file of placeholder bytes is no longer a usable fixture. Rendering a
+    real one keeps those tests exercising the real code path.
+    """
+    import subprocess
+
+    from pipeline import platform_support
+
+    if not platform_support.ffmpeg_available():
+        pytest.skip("needs FFmpeg to render a reel fixture")
+
+    path = tmp_path_factory.mktemp("reel") / "reel.mp4"
+    proc = subprocess.run(
+        [platform_support.ffmpeg(), "-y", "-v", "error",
+         "-f", "lavfi", "-i", "testsrc=size=1080x1920:rate=30",
+         "-f", "lavfi", "-i", "sine=frequency=440",
+         "-t", "5", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+         "-c:a", "aac", str(path)],
+        capture_output=True, text=True, timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return path

@@ -73,11 +73,10 @@ class Settings:
     voice: str = field(default_factory=lambda: os.getenv("VOICE", "chandan_en"))
     voice_engine: str = field(default_factory=lambda: os.getenv("VOICE_ENGINE", "silent"))
     script_engine: str = field(default_factory=lambda: os.getenv("SCRIPT_ENGINE", "template"))
-    gemini_api_key: str | None = field(default_factory=lambda: os.getenv("GEMINI_API_KEY"))
-    ollama_model: str = field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "llama3.1"))
-    ffmpeg: str = field(default_factory=lambda: os.getenv("FFMPEG_BIN", "ffmpeg"))
-    ffprobe: str = field(default_factory=lambda: os.getenv("FFPROBE_BIN", "ffprobe"))
-    alert_email: str | None = field(default_factory=lambda: os.getenv("ALERT_EMAIL"))
+
+    # Binaries, API keys and SMTP settings are deliberately absent: each is
+    # read from the environment where it is used, by the module that knows
+    # how to fail usefully without it. A second copy here would drift.
 
     def profile_dir(self) -> Path:
         return PROFILES_DIR / self.profile

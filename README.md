@@ -172,6 +172,54 @@ uploads a day.
 
 ---
 
+## Instagram setup
+
+The vertical cut goes out as a Reel. The caption comes from
+`metadata.json`, which the metadata stage already writes.
+
+One-time, on Meta's side:
+
+1. Convert the Instagram account to **Business** or **Creator** and link
+   it to a Facebook Page.
+2. Create a Meta app and add the **Instagram Graph API** product.
+3. Grant `instagram_content_publish` and `instagram_basic`.
+4. Generate a long-lived token and find the IG user id.
+
+Then in `.env`:
+
+```
+IG_USER_ID=17841400000000000
+IG_ACCESS_TOKEN=...
+```
+
+The file uploads straight from disk, so you do not need to host it
+anywhere. Set `IG_VIDEO_URL` only if you would rather Instagram pull it
+from a public HTTPS URL you control.
+
+Check it without posting:
+
+```
+python run.py 002 --stage instagram --dry-run
+```
+
+That probes the file with ffprobe and prints the exact caption. Reels
+must be 9:16, 3s or longer, H.264 with an AAC track; the stage refuses
+locally rather than letting Instagram answer `ERROR` after the upload.
+
+Publishing goes to both platforms:
+
+```
+python run.py 002 --publish                  # YouTube and Instagram
+python run.py 002 --publish --no-instagram    # YouTube only
+python run.py 002 --publish --instagram       # Reel only
+python run.py 002 --publish --reel 3          # a different cut
+```
+
+The two are siblings, not a sequence: either can be skipped, and
+neither is a prerequisite for the other. Both go through the same
+`assert_publishable`, so a second platform is not a way around Gate 2.
+Instagram allows 50 posts per 24 hours.
+
 ## Alerts
 
 The pipeline mails you when a stage fails, so an unattended run cannot
