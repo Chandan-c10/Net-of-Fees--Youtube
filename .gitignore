@@ -9,3 +9,7 @@ voices/*/reference/*
 !voices/*/reference/.gitkeep
 .pytest_cache/
 .DS_Store
+
+# Your real incident log. The .example file is the committed template;
+# this one gains real details about your system and stays local.
+data/incidents.json

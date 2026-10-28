@@ -1,0 +1,79 @@
+{
+  "system": "my automated trading system",
+  "period": "first 9 months live",
+  "_note": "Copy to incidents.json and replace with your real log. The recipe refuses to invent incidents.",
+  "incidents": [
+    {
+      "id": 1,
+      "title": "Order quantity rounded down to zero on small lots",
+      "layer": "execution",
+      "severity": "money_at_risk",
+      "days_hidden": 23,
+      "found_by": "live anomaly",
+      "note": "Integer division on lot size. Silent no-op, not an error."
+    },
+    {
+      "id": 2,
+      "title": "Timezone drift between signal and broker clock",
+      "layer": "execution",
+      "severity": "wrong_output",
+      "days_hidden": 41,
+      "found_by": "reconciliation",
+      "note": "Naive datetime compared against an exchange timestamp."
+    },
+    {
+      "id": 3,
+      "title": "Backtest used the close of the signal bar",
+      "layer": "research",
+      "severity": "wrong_output",
+      "days_hidden": 120,
+      "found_by": "manual recompute",
+      "note": "Classic lookahead. Made every result better than reality."
+    },
+    {
+      "id": 4,
+      "title": "Retry loop duplicated an order on timeout",
+      "layer": "execution",
+      "severity": "money_at_risk",
+      "days_hidden": 6,
+      "found_by": "live anomaly",
+      "note": "No idempotency key. The broker had accepted the first one."
+    },
+    {
+      "id": 5,
+      "title": "Risk gate read stale position state",
+      "layer": "risk",
+      "severity": "money_at_risk",
+      "days_hidden": 14,
+      "found_by": "test",
+      "note": "Cache not invalidated after a partial fill."
+    },
+    {
+      "id": 6,
+      "title": "Fee model ignored the buy-side stamp duty",
+      "layer": "research",
+      "severity": "wrong_output",
+      "days_hidden": 67,
+      "found_by": "manual recompute",
+      "note": "Made marginal strategies look profitable."
+    },
+    {
+      "id": 7,
+      "title": "Webhook accepted duplicate signals",
+      "layer": "ingest",
+      "severity": "degraded",
+      "days_hidden": 9,
+      "found_by": "log review",
+      "note": "No dedupe on signal id."
+    },
+    {
+      "id": 8,
+      "title": "Position sizing used notional, not risk",
+      "layer": "risk",
+      "severity": "money_at_risk",
+      "days_hidden": 31,
+      "found_by": "manual recompute",
+      "note": "Oversized every low-volatility entry."
+    }
+  ]
+}

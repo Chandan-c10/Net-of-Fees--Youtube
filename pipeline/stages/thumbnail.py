@@ -38,39 +38,71 @@ def _font(px: int):
 
 
 def _headlines(data: dict) -> list[tuple[str, str]]:
-    """Candidate (focal, supporting) pairs, drawn from the snapshot only."""
+    """Candidate (focal, supporting) pairs, drawn from the snapshot only.
+
+    One focal number, four words of support. Anything longer is unreadable
+    at the size a thumbnail is actually seen.
+    """
     out: list[tuple[str, str]] = []
-    if data.get("breakeven_points") is not None:
-        out.append((f"{data['breakeven_points']}", "points to break even"))
-    if data.get("drag_pct") is not None:
-        out.append((f"{data['drag_pct']}%", "of your profit, gone"))
-    ladder = data.get("ladder") or []
-    if ladder and ladder[0].get("drag_pct") is not None:
-        out.append((f"{ladder[0]['drag_pct']}%", "on a small win"))
+    recipe = data.get("recipe")
+
+    if recipe == "incident_log":
+        out += [
+            (f"{data['median_days_hidden']:.0f}", "days before I noticed"),
+            (f"{data['caught_by_tests']}/{data['total']}", "caught by tests"),
+            (f"{data['max_days_hidden']}", "days of wrong results"),
+        ]
+    if recipe == "fee_drag":
+        if data.get("breakeven_points") is not None:
+            out.append((f"{data['breakeven_points']}", "points to break even"))
+        if data.get("drag_pct") is not None:
+            out.append((f"{data['drag_pct']}%", "of your profit, gone"))
+        ladder = data.get("ladder") or []
+        if ladder and ladder[0].get("drag_pct") is not None:
+            out.append((f"{ladder[0]['drag_pct']}%", "on a small win"))
     if not out:
         out.append(("?", data.get("title", "")[:28]))
     return out[:3]
 
 
-def _render(focal: str, support: str, out: Path, style) -> Path:
+def _render(focal: str, support: str, out: Path, style,
+            series: str = "") -> Path:
+    """One template per profile, so the channel is recognisable in a feed.
+
+    Consistency beats novelty here: a viewer scrolling their subscriptions
+    should know it is yours before reading a word.
+    """
     w, h = LONGFORM.width, LONGFORM.height
     img = Image.new("RGB", (w, h), style.BACKGROUND)
     d = ImageDraw.Draw(img)
 
-    # A thick accent rule gives the channel a recognisable silhouette at
-    # thumbnail size, where text alone is unreadable.
-    d.rectangle([0, 0, int(w * 0.016), h], fill=style.ACCENT)
+    # A thick accent rule gives a recognisable silhouette at the size a
+    # thumbnail is actually served, where text alone is unreadable.
+    d.rectangle([0, 0, int(w * 0.022), h], fill=style.ACCENT)
 
-    focal_font = _font(int(h * 0.34))
-    support_font = _font(int(h * 0.085))
-    d.text((w * 0.10, h * 0.30), focal, font=focal_font,
+    # Focal number, oversized. This is the only element that survives
+    # downscaling to 168x94, so it carries the whole thumbnail.
+    focal_font = _font(int(h * 0.42))
+    d.text((w * 0.09, h * 0.40), focal, font=focal_font,
            fill=style.ACCENT, anchor="lm")
+
     words = support.split()
     if len(words) > MAX_WORDS + 2:
         support = " ".join(words[: MAX_WORDS + 2])
-    d.text((w * 0.10, h * 0.62), support, font=support_font,
+    d.text((w * 0.09, h * 0.70), support.upper(), font=_font(int(h * 0.088)),
            fill=style.INK, anchor="lm")
-    d.text((w * 0.10, h * 0.86), style.CHANNEL, font=_font(int(h * 0.05)),
+
+    if series:
+        badge = _font(int(h * 0.046))
+        pad = int(h * 0.022)
+        tw = d.textlength(series.upper(), font=badge)
+        box = [int(w * 0.09), int(h * 0.12),
+               int(w * 0.09 + tw + pad * 2), int(h * 0.12 + h * 0.082)]
+        d.rounded_rectangle(box, radius=int(h * 0.016), fill=style.ACCENT)
+        d.text((box[0] + pad, (box[1] + box[3]) / 2), series.upper(),
+               font=badge, fill=style.BACKGROUND, anchor="lm")
+
+    d.text((w * 0.09, h * 0.88), style.CHANNEL, font=_font(int(h * 0.05)),
            fill=style.INK_DIM, anchor="lm")
 
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -96,7 +128,7 @@ def run(ep: Episode, m: Manifest, profile) -> list[Path]:
 
     made: list[Path] = []
     for i, (focal, support) in enumerate(_headlines(data), start=1):
-        p = _render(focal, support, ep.thumbnail(i), style)
+        p = _render(focal, support, ep.thumbnail(i), style, m.series)
         legible = check_small_legibility(p)
         if not legible:
             log.info(f"thumb_{i} has weak contrast at {MIN_PREVIEW[0]}x{MIN_PREVIEW[1]}")

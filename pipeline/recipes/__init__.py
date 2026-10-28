@@ -44,4 +44,13 @@ def available() -> list[str]:
 
 
 def _load_builtin() -> None:
-    from . import fee_drag  # noqa: F401  (registers on import)
+    """Import every recipe module so each registers itself.
+
+    Discovered rather than listed, so adding a recipe is one new file.
+    """
+    import importlib
+    import pkgutil
+
+    for info in pkgutil.iter_modules(__path__):
+        if not info.name.startswith("_"):
+            importlib.import_module(f"{__name__}.{info.name}")

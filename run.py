@@ -30,8 +30,8 @@ from pipeline import config, logging_setup
 from pipeline.errors import GateError, PipelineError
 from pipeline.manifest import STAGES, Episode, Manifest
 from pipeline.recipes import available as available_recipes
-from pipeline.stages import (assemble, captions, charts, export, script_gen,
-                             shorts, thumbnail, upload, voice)
+from pipeline.stages import (assemble, captions, charts, export, metadata,
+                             script_gen, shorts, thumbnail, upload, voice)
 
 import profiles
 
@@ -68,7 +68,10 @@ def _run_stage(name: str, ep: Episode, m: Manifest, settings, args) -> None:
     elif name == "captions":
         captions.run(ep, m, method=args.captions)
     elif name == "assemble":
-        assemble.run(ep, m, burn_captions=not args.no_captions)
+        assemble.run(ep, m, burn_captions=not args.no_captions,
+                     profile=profile, animate=not args.no_animate)
+    elif name == "metadata":
+        metadata.run(ep, m, profile)
     elif name == "thumbnail":
         thumbnail.run(ep, m, profile)
     elif name == "shorts":
@@ -182,7 +185,7 @@ def _approve_gate_1(ep: Episode, m: Manifest, log) -> int:
 
     data = json.loads(ep.snapshot.read_text())
     from pipeline.script_format import validate_against_snapshot
-    validate_against_snapshot(m.scenes, data)
+    validate_against_snapshot(m.scenes, data, profiles.load(m.profile))
 
     m.pass_gate_1()
     ep.save_manifest(m)
@@ -193,7 +196,7 @@ def _approve_gate_1(ep: Episode, m: Manifest, log) -> int:
 
 def _approve_gate_2(ep: Episode, m: Manifest, log) -> int:
     """Gate 2. The upload stage independently refuses a null approved_at."""
-    for required in ("assemble", "thumbnail"):
+    for required in ("assemble", "metadata", "thumbnail"):
         if not m.is_done(required):
             raise GateError(f"{required} is not complete")
     if not m.gate_1_passed_at:
@@ -345,6 +348,7 @@ def main(argv: list[str] | None = None) -> int:
         rp.add_argument("--dry-run", action="store_true")
         rp.add_argument("--through-upload", action="store_true")
         rp.add_argument("--no-captions", action="store_true")
+        rp.add_argument("--no-animate", action="store_true")
         rp.add_argument("--voice-engine", default=config.load().voice_engine)
         rp.add_argument("--script-engine", default=config.load().script_engine)
         rp.add_argument("--captions", default="derive", choices=("derive", "whisper"))

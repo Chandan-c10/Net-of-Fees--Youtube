@@ -47,11 +47,21 @@ def test_malformed_scripts_are_rejected(bad, match):
 
 def test_missing_data_key_returns_a_validation_error(fixture_snapshot):
     """The check that catches a scene the model invented."""
+    import profiles
     scenes = to_scenes(parse("[SCENE 1 | chart: invented_key]\ntext here"))
-    with pytest.raises(ValidationError, match="absent from the snapshot"):
-        validate_against_snapshot(scenes, fixture_snapshot)
+    with pytest.raises(ValidationError, match="absent from"):
+        validate_against_snapshot(scenes, fixture_snapshot,
+                                  profiles.load("trading"))
 
 
 def test_known_data_keys_pass(fixture_snapshot):
+    import profiles
     scenes = to_scenes(parse(GOOD))
-    validate_against_snapshot(scenes, fixture_snapshot)
+    validate_against_snapshot(scenes, fixture_snapshot, profiles.load("trading"))
+
+
+def test_a_profiles_charts_are_valid_keys(fixture_snapshot):
+    """A chart the profile implements needs no matching snapshot field."""
+    import profiles
+    scenes = to_scenes(parse("[SCENE 1 | chart: drag_ladder]\n41 percent gone."))
+    validate_against_snapshot(scenes, fixture_snapshot, profiles.load("trading"))

@@ -24,13 +24,15 @@ STAGES: tuple[str, ...] = (
     "charts",
     "captions",
     "assemble",
+    "metadata",
     "thumbnail",
     "shorts",
     "upload",
 )
 
 # Stages that may not run until the named gate has been cleared.
-GATE_1_STAGES = ("voice", "charts", "captions", "assemble", "thumbnail")
+GATE_1_STAGES = ("voice", "charts", "captions", "assemble",
+                 "metadata", "thumbnail")
 GATE_2_STAGES = ("shorts", "upload")
 
 
@@ -69,6 +71,8 @@ class Manifest:
     topic: str = ""
     title: str = ""
     profile: str = "trading"
+    series: str = ""
+    series_episode: int | None = None
     tier: str = "A"
     recipe: str = ""
     voice: str = "chandan_en"

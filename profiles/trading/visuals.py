@@ -20,6 +20,10 @@ from . import style
 
 RENDERERS: dict[str, Callable[..., None]] = {}
 
+# This profile's bar charts can draw themselves in. The motion stage checks
+# this flag before attempting a build-in.
+SUPPORTS_REVEAL = True
+
 
 def renderer(key: str) -> Callable:
     def wrap(fn: Callable) -> Callable:
@@ -108,7 +112,7 @@ def title_card(data: dict[str, Any], spec, type_scale, out_path: Path, **kw) -> 
 
 @renderer("fee_stack")
 def fee_stack(data: dict[str, Any], spec, type_scale, out_path: Path,
-              annotate: list[str] | None = None, **kw) -> None:
+              annotate: list[str] | None = None, reveal: float = 1.0, **kw) -> None:
     """Every charge on one round trip, largest first."""
     charges = data.get("charges")
     if not charges:
@@ -119,7 +123,10 @@ def fee_stack(data: dict[str, Any], spec, type_scale, out_path: Path,
         raise StageError("fee_stack found no non-zero charges")
     items.sort(key=lambda kv: kv[1], reverse=True)
     labels = [k for k, _ in items]
-    values = [v for _, v in items]
+    full = [v for _, v in items]
+    # A partial reveal grows the bars; the axis stays fixed so nothing
+    # jumps as the chart settles.
+    values = [v * reveal for v in full]
     highlight = {CHARGE_LABELS.get(a, a) for a in (annotate or [])}
     colors = [style.ACCENT if lb in highlight else style.COST for lb in labels]
 
@@ -129,11 +136,12 @@ def fee_stack(data: dict[str, Any], spec, type_scale, out_path: Path,
     ax.set_title(f"One trade, {style.money(charges['total'], 2)} in charges", loc="left", pad=22)
     ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: style.money(v, 0)))
     ax.grid(axis="y", visible=False)
-    span = max(values) or 1
-    for bar, v in zip(bars, values):
-        ax.text(v + span * 0.015, bar.get_y() + bar.get_height() / 2,
-                style.money(v, 2), color=style.INK, va="center",
-                fontsize=type_scale.annotation)
+    span = max(full) or 1
+    if reveal >= 0.999:
+        for bar, v in zip(bars, full):
+            ax.text(v + span * 0.015, bar.get_y() + bar.get_height() / 2,
+                    style.money(v, 2), color=style.INK, va="center",
+                    fontsize=type_scale.annotation)
     ax.set_xlim(0, span * 1.22)
     _finish(fig, ax, out_path, type_scale)
 
@@ -166,7 +174,8 @@ def gross_vs_net(data: dict[str, Any], spec, type_scale, out_path: Path, **kw) -
 
 
 @renderer("drag_ladder")
-def drag_ladder(data: dict[str, Any], spec, type_scale, out_path: Path, **kw) -> None:
+def drag_ladder(data: dict[str, Any], spec, type_scale, out_path: Path,
+                reveal: float = 1.0, **kw) -> None:
     """How cost drag falls away as the move gets bigger.
 
     This is the chart that carries the episode: a small win is mostly fees.
@@ -180,7 +189,8 @@ def drag_ladder(data: dict[str, Any], spec, type_scale, out_path: Path, **kw) ->
 
     fig, ax = _figure(spec, type_scale)
     colors = [style.COST if d is not None and d >= 20 else style.KEPT for d in drag]
-    bars = ax.bar(xs, drag, color=colors, width=0.56)
+    shown = [(d or 0) * reveal for d in drag]
+    bars = ax.bar(xs, shown, color=colors, width=0.56)
     ax.set_xticks(xs)
     ax.set_xticklabels([f"{m} pt" for m in moves])
     ax.set_xlabel("Size of the move in premium")
@@ -189,11 +199,13 @@ def drag_ladder(data: dict[str, Any], spec, type_scale, out_path: Path, **kw) ->
     ax.set_title("A small win is mostly charges", loc="left", pad=22)
     ax.grid(axis="x", visible=False)
     top = max(d for d in drag if d is not None)
-    for bar, d in zip(bars, drag):
-        if d is None:
-            continue
-        ax.text(bar.get_x() + bar.get_width() / 2, d + top * 0.03, f"{d:.0f}%",
-                color=style.INK, ha="center", fontsize=type_scale.annotation)
+    if reveal >= 0.999:
+        for bar, d in zip(bars, drag):
+            if d is None:
+                continue
+            ax.text(bar.get_x() + bar.get_width() / 2, d + top * 0.03,
+                    f"{d:.0f}%", color=style.INK, ha="center",
+                    fontsize=type_scale.annotation)
     ax.set_ylim(0, top * 1.2)
     _finish(fig, ax, out_path, type_scale)
 
@@ -225,7 +237,8 @@ def breakeven(data: dict[str, Any], spec, type_scale, out_path: Path, **kw) -> N
 # ---- entry point ------------------------------------------------------
 
 
-def build_visual(scene, data: dict[str, Any], spec, out_path: Path) -> Path:
+def build_visual(scene, data: dict[str, Any], spec, out_path: Path,
+                 reveal: float | None = None) -> Path:
     """Render one scene's visual. Called by the charts stage.
 
     A scene with no chart key gets the title card, so a script can narrate
@@ -240,6 +253,8 @@ def build_visual(scene, data: dict[str, Any], spec, out_path: Path) -> Path:
         )
     type_scale = style.SHORTS_TYPE if spec.aspect == "9:16" else style.LONGFORM_TYPE
     kwargs: dict[str, Any] = {}
+    if reveal is not None and key not in ("title", "breakeven"):
+        kwargs["reveal"] = reveal
     if scene.visual_spec.get("annotate"):
         kwargs["annotate"] = scene.visual_spec["annotate"]
     if key == "title":

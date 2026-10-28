@@ -139,32 +139,39 @@ def render(scenes: list[Scene], title: str) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def validate_against_snapshot(scenes: list[Scene], snapshot: dict) -> None:
-    """Every data_key a scene references must exist in the snapshot.
+def validate_against_snapshot(scenes: list[Scene], snapshot: dict,
+                              profile=None) -> None:
+    """Every data_key a scene references must resolve to something renderable.
 
-    This is the check that catches a scene the model invented. It returns
-    the equivalent of HTTP 422 at Gate 1, before any render -- architecture
-    doc, section 21.
+    A key is valid if it is either a field in the snapshot or a chart the
+    profile implements. This is the check that catches a scene the model
+    invented, and it runs at Gate 1 before any render -- architecture doc,
+    section 21.
+
+    The profile is asked what it can draw rather than the list being
+    hardcoded here, so adding a chart to a profile needs no change to this
+    module.
     """
+    renderable: set[str] = set()
+    if profile is not None:
+        try:
+            renderable = set(profile.visuals.available_keys())
+        except AttributeError:
+            renderable = set()
+
     missing: list[str] = []
     for s in scenes:
         key = s.visual_spec.get("data_key")
-        if key and key not in snapshot and key not in _derived_keys(snapshot):
+        if key and key not in snapshot and key not in renderable:
             missing.append(f"scene {s.index} -> {key!r}")
+
     if missing:
-        available = sorted(set(snapshot) | _derived_keys(snapshot))
+        where = "the snapshot"
+        if renderable:
+            where += f" or the {getattr(profile, 'PROFILE_NAME', '?')!r} profile"
         raise ValidationError(
-            "scenes reference data keys absent from the snapshot: "
+            f"scenes reference data keys absent from {where}: "
             + "; ".join(missing)
-            + f"\n  available keys: {available}"
+            + f"\n  snapshot keys: {sorted(snapshot)}"
+            + (f"\n  profile charts: {sorted(renderable)}" if renderable else "")
         )
-
-
-def _derived_keys(snapshot: dict) -> set[str]:
-    """Named views a profile may render even though they are not top-level keys."""
-    derived = set()
-    if "charges" in snapshot:
-        derived |= {"fee_stack", "gross_vs_net"}
-    if "ladder" in snapshot:
-        derived |= {"drag_ladder", "breakeven"}
-    return derived

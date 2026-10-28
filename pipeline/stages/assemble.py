@@ -21,7 +21,9 @@ from ..platform_support import concat_path, run_ffmpeg
 from ..voices.base import measure_media
 from . import captions as captions_stage
 from . import voice_process
-from .caption_overlay import Cue, build_frames
+from .caption_overlay import Cue, build_frames, render_cue_frame
+from .export import load_snapshot
+from .motion import BUILD_SEC, build_in
 
 
 def build_concat_list(frames: list[tuple[Path, float]], path: Path) -> Path:
@@ -45,8 +47,14 @@ def build_concat_list(frames: list[tuple[Path, float]], path: Path) -> Path:
 
 
 def scene_frames(ep: Episode, m: Manifest, spec: VideoSpec,
-                 burn_captions: bool) -> list[tuple[Path, float]]:
-    """One frame per caption cue when burning, else one per scene."""
+                 burn_captions: bool, profile=None,
+                 animate: bool = True) -> list[tuple[Path, float]]:
+    """One frame per caption cue when burning, else one per scene.
+
+    When animation is on, each scene opens with a short build-in. The
+    build consumes the first part of that scene's own time rather than
+    adding any, so the total is unchanged and audio stays in sync.
+    """
     for scene in m.scenes:
         if not ep.scene_visual(scene).exists():
             raise StageError(f"no visual for {scene.slug}; run charts first")
@@ -73,7 +81,41 @@ def scene_frames(ep: Episode, m: Manifest, spec: VideoSpec,
             )
 
     by_scene = {s.index: ep.scene_visual(s) for s in m.scenes}
-    return build_frames(cues, lambda i: by_scene[i], spec, ep.dir / "frames")
+    frames = build_frames(cues, lambda i: by_scene[i], spec, ep.dir / "frames")
+
+    if not animate or profile is None:
+        return frames
+
+    data = load_snapshot(ep)
+    out: list[tuple[Path, float]] = []
+    cue_index = 0
+    for scene in m.scenes:
+        scene_cues = [c for c in cues if c.scene == scene.index]
+        scene_frames_ = frames[cue_index:cue_index + len(scene_cues)]
+        cue_index += len(scene_cues)
+        if not scene_frames_:
+            continue
+
+        builds = build_in(scene, data, spec, profile, ep.dir / "builds")
+        if not builds:
+            out.extend(scene_frames_)
+            continue
+
+        # The build borrows time from this scene's first cue, so the cue
+        # text stays on screen for what remains of it.
+        first_path, first_dur = scene_frames_[0]
+        borrowed = min(BUILD_SEC, first_dur * 0.6)
+        per_build = borrowed / len(builds)
+
+        for b in builds:
+            captioned = render_cue_frame(
+                b.path, scene_cues[0].text, spec,
+                ep.dir / "builds" / f"{b.path.stem}_cap.png",
+            )
+            out.append((captioned, per_build))
+        out.append((first_path, max(0.05, first_dur - borrowed)))
+        out.extend(scene_frames_[1:])
+    return out
 
 
 # Captions are composited with Pillow in caption_overlay.py rather than
@@ -83,13 +125,14 @@ def scene_frames(ep: Episode, m: Manifest, spec: VideoSpec,
 
 
 def run(ep: Episode, m: Manifest, spec: VideoSpec = LONGFORM,
-        burn_captions: bool = True, master_audio: bool = True) -> Path:
+        burn_captions: bool = True, master_audio: bool = True,
+        profile=None, animate: bool = True) -> Path:
     log = get(m.id, "assemble")
     if not m.scenes:
         raise StageError("no scenes; run the script stage first")
 
     audio = voice_process.run(ep, m, master=master_audio)
-    frames = scene_frames(ep, m, spec, burn_captions)
+    frames = scene_frames(ep, m, spec, burn_captions, profile, animate)
     listing = build_concat_list(frames, ep.dir / "concat_video.txt")
 
     args = [
@@ -134,6 +177,7 @@ def run(ep: Episode, m: Manifest, spec: VideoSpec = LONGFORM,
         resolution=f"{spec.width}x{spec.height}",
         captions_burned=burn_captions,
         frames=len(frames),
+        animated=animate and profile is not None,
     )
     log.info(f"{actual:.2f}s, drift {drift*1000:.0f}ms, "
              f"{ep.video.stat().st_size/1_048_576:.1f} MB")

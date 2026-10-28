@@ -21,7 +21,7 @@ def run(ep: Episode, m: Manifest, engine_name: str = "silent",
     if not m.scenes:
         raise StageError("no scenes; run the script stage first")
 
-    engine = get_engine(engine_name)
+    engine = get_engine(engine_name, episode_id=m.id)
     ep.audio_dir.mkdir(parents=True, exist_ok=True)
 
     # Consent is enforced, not trusted. The draft engine is exempt because
@@ -41,12 +41,18 @@ def run(ep: Episode, m: Manifest, engine_name: str = "silent",
         total += scene.duration_sec
         log.debug(f"{scene.slug} {scene.duration_sec:.2f}s voice={voice}")
 
+    from ..pacing import describe
+    pacing = describe(m.scenes)
     m.mark_done(
         "voice",
         engine=engine.name,
+        pacing=pacing,
         draft=bool(getattr(engine, "draft", False)),
         total_sec=round(total, 3),
         voices=sorted(voices_used),
     )
-    log.info(f"{len(m.scenes)} scenes, {total:.1f}s total, engine={engine.name}"
-             + (" [DRAFT]" if getattr(engine, "draft", False) else ""))
+    log.info(
+        f"{len(m.scenes)} scenes, {total:.1f}s total, engine={engine.name}, "
+        f"scene length varies {pacing.get('variation_pct', 0)}%"
+        + (" [DRAFT]" if getattr(engine, "draft", False) else "")
+    )

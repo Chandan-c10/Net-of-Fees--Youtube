@@ -21,13 +21,23 @@ from .export import load_snapshot
 
 ENGINES = ("template", "gemini", "ollama")
 
+# One deterministic template per recipe. Registered at the bottom of this
+# module, once every builder is defined.
+TEMPLATES: dict[str, object] = {}
+
 
 def run(ep: Episode, m: Manifest, engine: str = "template", profile=None) -> None:
     log = get(m.id, "script")
     data = load_snapshot(ep)
 
     if engine == "template":
-        text = _from_template(m, data, profile)
+        builder = TEMPLATES.get(data.get("recipe", ""))
+        if builder is None:
+            raise ConfigError(
+                f"no script template for recipe {data.get('recipe')!r}. "
+                f"Known: {sorted(TEMPLATES)}"
+            )
+        text = builder(m, data, profile)
     elif engine == "gemini":
         text = _from_gemini(m, data, profile)
     elif engine == "ollama":
@@ -37,7 +47,7 @@ def run(ep: Episode, m: Manifest, engine: str = "template", profile=None) -> Non
 
     parsed = parse(text)
     scenes = to_scenes(parsed, default_voice=m.voice)
-    validate_against_snapshot(scenes, data)
+    validate_against_snapshot(scenes, data, profile)
     _check_hook(scenes)
 
     m.scenes = scenes
@@ -202,3 +212,65 @@ def _from_ollama(m: Manifest, data: dict, profile) -> str:
     if not text.strip():
         raise StageError(f"Ollama model {model!r} returned nothing")
     return text
+
+
+def _from_template_incidents(m: Manifest, data: dict, profile) -> str:
+    """Deterministic script for the incident_log recipe.
+
+    Every figure is formatted from the snapshot, so the narration cannot
+    disagree with the charts it sits over.
+    """
+    worst = data["worst"]
+    layers = list(data["by_layer"])
+    top_layer = layers[0]
+    found = data["by_detection"]
+    biggest_source = max(found, key=found.get)
+
+    return f"""# {data.get('title') or m.title}
+
+[SCENE 1 | chart: detection_gap]
+Eight bugs reached my live trading system. My test suite caught one of
+them. The other seven were found by the system doing something I could
+see was wrong, and the median one had been running for
+{data['median_days_hidden']} days before I noticed.
+
+[SCENE 2 | chart: detection_gap]
+That is the number worth sitting with. Not eight bugs. Twenty seven days.
+A bug in a web app announces itself. A bug in a trading system just
+quietly makes slightly worse decisions, and slightly worse looks exactly
+like a bad week.
+
+[SCENE 3 | chart: severity_split]
+{data['serious']} of the {data['total']} produced wrong output or put money
+at risk. The worst one was {worst['title'].lower()}. It sat in the
+{worst['layer']} layer for {worst['days_hidden']} days, and every result I
+looked at during that time was better than reality.
+
+[SCENE 4 | chart: by_layer]
+Here is where they actually lived. {top_layer.title()} took the most.
+Not the strategy. Not the signal logic. The plumbing between deciding to
+trade and the trade existing.
+
+[SCENE 5 | chart: by_detection]
+And here is how they were found. Tests caught {data['caught_by_tests_pct']}
+percent. The rest came from {biggest_source.replace('_', ' ')} and from
+recomputing numbers by hand that the system had already reported.
+
+[SCENE 6 | chart: architecture]
+The pattern is consistent. The bugs were not in the clever part. They were
+in the boring part, where an integer divided to zero, a clock disagreed
+with another clock, and a retry sent an order the broker had already
+accepted.
+
+[SCENE 7 | chart: by_detection]
+What changed is that I stopped trusting the system to tell me it was
+healthy. Reconciliation against the broker statement runs daily now, and
+it has found more than my tests ever did. I expect the next eight bugs to
+hide just as well as these did.
+"""
+
+
+TEMPLATES.update({
+    "fee_drag": _from_template,
+    "incident_log": _from_template_incidents,
+})
