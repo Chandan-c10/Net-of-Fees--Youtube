@@ -7,15 +7,14 @@ scene compounds across the episode into visible drift.
 from __future__ import annotations
 
 import pytest
-
 from conftest import needs_ffmpeg
-from pipeline.config import LONGFORM, SYNC_TOLERANCE_SEC
+
+import profiles
+from pipeline.config import SYNC_TOLERANCE_SEC
 from pipeline.errors import StageError
 from pipeline.stages import assemble, captions, charts, voice
 from pipeline.stages.assemble import build_concat_list
 from pipeline.voices.base import measure_media
-
-import profiles
 
 
 def _render(ep, m):
@@ -39,7 +38,8 @@ def test_video_duration_matches_the_sum_of_scene_durations(episode):
 
 @needs_ffmpeg
 def test_assembled_video_has_both_streams(episode):
-    import subprocess, json
+    import json
+    import subprocess
     m = episode.load_manifest()
     video = _render(episode, m)
     out = subprocess.run(

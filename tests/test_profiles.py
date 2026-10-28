@@ -104,3 +104,19 @@ def test_style_exposes_what_stages_use(name):
         assert hasattr(p.style, attr), f"{name}.style lacks {attr}"
     assert callable(p.style.money)
     assert callable(p.style.rc_params)
+
+
+# ---- a bad profile name must fail at creation, not three stages later --
+
+
+def test_available_lists_every_profile_on_disk():
+    assert set(profiles.available()) == set(ALL_PROFILES)
+
+
+def test_an_unknown_profile_names_the_ones_that_exist():
+    from pipeline.errors import ConfigError
+
+    with pytest.raises(ConfigError) as exc:
+        profiles.load("nosuchprofile")
+    message = str(exc.value)
+    assert "trading" in message and "engineering" in message

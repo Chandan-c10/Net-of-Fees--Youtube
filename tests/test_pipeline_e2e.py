@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import pytest
-
 from conftest import needs_ffmpeg
-from pipeline.errors import StageError
-from pipeline.manifest import Episode, Manifest
-from pipeline.stages import (assemble, captions, charts, export, script_gen,
-                             shorts, thumbnail, voice)
 
 import profiles
+from pipeline.errors import StageError
+from pipeline.manifest import Episode, Manifest
+from pipeline.stages import assemble, captions, charts, export, script_gen, shorts, thumbnail, voice
 
 
 @needs_ffmpeg
@@ -110,8 +108,6 @@ def test_unknown_stock_voice_is_rejected():
 def test_stock_voice_records_it_is_not_a_clone(tmp_path):
     """Provenance must state plainly that no real person was copied."""
     import json
-    import subprocess
-    import sys
     from pathlib import Path
 
     root = Path(__file__).resolve().parent.parent

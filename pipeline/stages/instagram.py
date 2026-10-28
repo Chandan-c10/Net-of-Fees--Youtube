@@ -32,6 +32,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import UTC
 
 from .. import platform_support
 from ..errors import ConfigError, StageError
@@ -157,10 +158,19 @@ def caption_for(ep: Episode, m: Manifest, ref: str) -> str:
 
 def reel_path(ep: Episode, which: int = 1):
     """The vertical cut to publish. Reels are 9:16; the long-form is not."""
+    if which < 1:
+        raise ConfigError(
+            f"--reel must be 1 or higher, got {which}; the cuts are "
+            "numbered from 1"
+        )
     path = ep.shorts_dir / f"short_{which:02d}.mp4"
     if not path.exists():
+        existing = sorted(p.name for p in ep.shorts_dir.glob("short_*.mp4")) \
+            if ep.shorts_dir.exists() else []
         raise StageError(
-            f"no vertical cut at {path}; run the shorts stage first"
+            f"no vertical cut at {path}. "
+            + (f"This episode has: {existing}" if existing
+               else "Run the shorts stage first.")
         )
     return path
 
@@ -181,7 +191,7 @@ def preflight(path) -> dict:
     proc = subprocess.run(
         [platform_support.ffprobe(), "-v", "error", "-print_format", "json",
          "-show_format", "-show_streams", str(path)],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, timeout=60, check=False,
     )
     if proc.returncode != 0:
         raise StageError(f"ffprobe could not read {path.name}: {proc.stderr.strip()}")
@@ -368,9 +378,9 @@ def run(ep: Episode, m: Manifest, dry_run: bool = False,
     if row.get("attempts", 1) > 1 and not row.get("external_id"):
         found = _reconcile(user_id, token, ref)
         if found:
-            from datetime import datetime, timezone
+            from datetime import datetime
             row.update(status="posted", external_id=found,
-                       posted_at=datetime.now(timezone.utc).isoformat())
+                       posted_at=datetime.now(UTC).isoformat())
             m.mark_done("instagram", media_id=found, reconciled=True)
             log.info(f"previous attempt had already landed as {found}")
             return
@@ -391,8 +401,8 @@ def run(ep: Episode, m: Manifest, dry_run: bool = False,
         row.update(status="failed", error=f"no media id in {resp}")
         raise StageError(f"Instagram did not return a media id: {resp}")
 
-    from datetime import datetime, timezone
+    from datetime import datetime
     row.update(status="posted", external_id=media_id,
-               posted_at=datetime.now(timezone.utc).isoformat())
+               posted_at=datetime.now(UTC).isoformat())
     m.mark_done("instagram", media_id=media_id, file=path.name, **probed)
     log.info(f"posted reel {media_id}")

@@ -7,7 +7,6 @@ What it cannot cover is Meta's own validation, which needs a live token.
 """
 
 import json
-import re
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -156,7 +155,7 @@ def test_a_real_publish_sequence_end_to_end(graph, ready):
     assert got["publish_form"]["creation_id"] == "CONTAINER1"
 
     assert manifest.stage("instagram").data["media_id"] == "MEDIA42"
-    row = [r for r in manifest.platform_posts if r["platform"] == "instagram"][0]
+    row = next(r for r in manifest.platform_posts if r["platform"] == "instagram")
     assert row["status"] == "posted" and row["external_id"] == "MEDIA42"
 
 
@@ -168,7 +167,7 @@ def test_a_real_400_is_reported_with_the_api_message(graph, ready):
     assert "400" in str(exc.value)
     assert "OAuthException" in str(exc.value)
     assert "Invalid parameter" in str(exc.value)
-    row = [r for r in manifest.platform_posts if r["platform"] == "instagram"][0]
+    row = next(r for r in manifest.platform_posts if r["platform"] == "instagram")
     assert row["status"] == "failed"
 
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ..errors import ConfigError, GateError, StageError
@@ -36,7 +36,7 @@ DISCLAIMER = (
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def assert_publishable(m: Manifest) -> None:
@@ -98,7 +98,7 @@ def _reconcile(youtube, row: dict, m: Manifest) -> str | None:
         resp = youtube.search().list(
             part="id,snippet", forMine=True, type="video", maxResults=25
         ).execute()
-    except Exception as exc:  # noqa: BLE001 - any API error means "cannot confirm"
+    except Exception as exc:
         raise StageError(
             f"cannot reconcile a previous upload attempt: {exc}. "
             f"Check the channel by hand before retrying, or this may double-post."
@@ -193,7 +193,7 @@ def run(ep: Episode, m: Manifest, dry_run: bool = False,
             status, response = request.next_chunk()
             if status:
                 log.debug(f"upload {int(status.progress() * 100)}%")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         row.update(status="failed", error=str(exc))
         if "quotaExceeded" in str(exc):
             raise StageError(

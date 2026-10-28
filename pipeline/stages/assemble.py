@@ -20,12 +20,12 @@ from ..manifest import Episode, Manifest
 from ..platform_support import concat_path, run_ffmpeg
 from ..voices.base import measure_media
 from . import captions as captions_stage
+from . import music as music_stage
+from . import transitions as transitions_stage
 from . import voice_process
 from .caption_overlay import Cue, build_frames, render_cue_frame
 from .export import load_snapshot
 from .motion import BUILD_SEC, build_in
-from . import music as music_stage
-from . import transitions as transitions_stage
 
 
 def build_concat_list(frames: list[tuple[Path, float]], path: Path) -> Path:

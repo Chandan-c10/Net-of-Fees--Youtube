@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
 
 from ..errors import StageError
 from ..logging_setup import get
@@ -93,7 +92,7 @@ def _titles(data: dict, m: Manifest) -> list[TitleCandidate]:
                 "a share, not an amount; shares travel better",
             ),
             TitleCandidate(
-                f"Why a small win is mostly fees",
+                "Why a small win is mostly fees",
                 "the principle, for search traffic",
             ),
         ]
@@ -130,9 +129,9 @@ def hashtags(data: dict, profile, limit: int = 12) -> list[str]:
     tags = list(getattr(profile, "HASHTAGS", ()))
     recipe = data.get("recipe")
     if recipe == "incident_log":
-        tags = ["#postmortem", "#debugging"] + tags
+        tags = ["#postmortem", "#debugging", *tags]
     elif recipe == "fee_drag":
-        tags = ["#tradingcosts", "#optionstrading"] + tags
+        tags = ["#tradingcosts", "#optionstrading", *tags]
     seen, out = set(), []
     for t in tags:
         if t.lower() not in seen:

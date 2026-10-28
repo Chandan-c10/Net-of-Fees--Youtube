@@ -63,7 +63,7 @@ def available_voices() -> dict[str, str]:
         # The package does not expose a stable roster API across versions,
         # so the curated table stays authoritative for descriptions.
         return dict(KNOWN_VOICES)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return dict(KNOWN_VOICES)
 
 

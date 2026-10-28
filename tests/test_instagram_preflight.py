@@ -31,8 +31,9 @@ def _render(path, *, video=VERTICAL, seconds=5.0, vcodec="libx264",
     args += ["-t", str(seconds), "-c:v", vcodec, "-pix_fmt", "yuv420p"]
     args += ["-c:a", acodec] if audio else ["-an"]
     args += [str(path)]
-    proc = subprocess.run([platform_support.ffmpeg()] + args,
-                          capture_output=True, text=True, timeout=120)
+    proc = subprocess.run([platform_support.ffmpeg(), *args],
+                          capture_output=True, text=True,
+                          timeout=120, check=False)
     assert proc.returncode == 0, proc.stderr
 
 

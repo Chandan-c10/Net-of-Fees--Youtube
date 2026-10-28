@@ -3,14 +3,11 @@ captions, mastering, music, metadata and the finishing pass."""
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
-
 from conftest import needs_ffmpeg
+
 from pipeline.config import LONGFORM
 from pipeline.errors import StageError
-
 
 # ---- pacing -----------------------------------------------------------
 
@@ -59,6 +56,7 @@ def test_short_scenes_skip_the_build():
 def test_dissolve_preserves_total_duration(tmp_path):
     """A dissolve borrows time; it must never add any."""
     from PIL import Image
+
     from pipeline.stages.transitions import apply
 
     frames = []
@@ -74,6 +72,7 @@ def test_dissolve_preserves_total_duration(tmp_path):
 
 def test_dissolve_skipped_when_there_is_no_time(tmp_path):
     from PIL import Image
+
     from pipeline.stages.transitions import apply
     frames = []
     for i in range(3):
@@ -87,6 +86,7 @@ def test_dissolve_skipped_when_there_is_no_time(tmp_path):
 
 def test_caption_frame_matches_the_target_resolution(tmp_path):
     from PIL import Image
+
     from pipeline.stages.caption_overlay import render_cue_frame
     src = tmp_path / "chart.png"
     Image.new("RGB", (640, 360), (10, 12, 18)).save(src)
@@ -140,7 +140,7 @@ def test_clickbait_is_flagged():
 
 
 def test_overlong_titles_are_flagged():
-    from pipeline.stages.metadata import TitleCandidate, TITLE_MAX
+    from pipeline.stages.metadata import TITLE_MAX, TitleCandidate
     long = TitleCandidate("x" * (TITLE_MAX + 10), "x")
     assert any("truncates" in w for w in long.warnings)
 
@@ -149,14 +149,16 @@ def test_hashtags_are_deduplicated_and_capped():
     import profiles
     from pipeline.stages.metadata import hashtags
     tags = hashtags({"recipe": "fee_drag"}, profiles.load("trading"), limit=5)
-    assert len(tags) == 5 and len(set(t.lower() for t in tags)) == 5
+    assert len(tags) == 5 and len({t.lower() for t in tags}) == 5
 
 
 # ---- mastering and finishing ------------------------------------------
 
 @needs_ffmpeg
 def test_mastering_produces_mono_at_the_configured_rate(episode):
-    import subprocess, json as _json
+    import json as _json
+    import subprocess
+
     from pipeline.config import AUDIO_CHANNELS, AUDIO_SAMPLE_RATE
     from pipeline.stages import voice, voice_process
     m = episode.load_manifest()

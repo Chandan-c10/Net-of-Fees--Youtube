@@ -6,16 +6,19 @@ function of the snapshot.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 from matplotlib.ticker import MaxNLocator
 
 from pipeline.errors import StageError
+
 from . import style
 
 RENDERERS: dict[str, Callable[..., None]] = {}
@@ -105,7 +108,7 @@ def detection_gap(data, spec, ts, out: Path, **kw):
     ax.set_title(f"Median {median} days before detection", loc="left", pad=22)
     ax.grid(axis="y", visible=False)
     span = max(days) or 1
-    for bar, d in zip(bars, days):
+    for bar, d in zip(bars, days, strict=True):
         ax.text(d + span * 0.015, bar.get_y() + bar.get_height() / 2, f"{d}d",
                 color=style.INK, va="center", fontsize=ts.annotation)
     ax.set_xlim(0, span * 1.15)
@@ -179,7 +182,7 @@ def severity_split(data, spec, ts, out: Path, **kw):
 @renderer("architecture")
 def architecture(data, spec, ts, out: Path, **kw):
     """A layered system diagram, drawn from the layers in the data."""
-    layers = list((data.get("by_layer") or {}))
+    layers = list(data.get("by_layer") or {})
     if not layers:
         raise StageError("architecture needs 'by_layer' to name the layers")
     counts = data["by_layer"]

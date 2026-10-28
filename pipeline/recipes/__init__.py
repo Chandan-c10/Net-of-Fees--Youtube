@@ -7,7 +7,7 @@ new story every time" comes from -- architecture doc, section 11.
 
 from __future__ import annotations
 
-from typing import Callable, Protocol
+from typing import Protocol
 
 from ..errors import ConfigError
 

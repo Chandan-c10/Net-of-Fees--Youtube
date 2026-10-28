@@ -16,6 +16,15 @@ from .errors import ScrubError
 
 # Each pattern is (name, regex). Deliberately broad: a false positive costs
 # one manual review, a false negative costs a published credential.
+# An env-var name carries a prefix before the telling word: the secret in
+# SMTP_APP_PASSWORD is no less a secret than the one in PASSWORD.
+#
+# One bounded character class, not nested quantifiers. The obvious
+# spelling -- [A-Za-z0-9]*(?:[_ -][A-Za-z0-9]+)*? -- backtracks
+# catastrophically: 1.8 seconds on 8 KB of underscores, and this scanner
+# runs over text the pipeline did not write.
+ENV_PREFIX = r"[A-Za-z0-9_ -]{0,64}"
+
 PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("aws_access_key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
     ("google_api_key", re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b")),
@@ -30,8 +39,25 @@ PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("account_number", re.compile(r"(?i)\b(?:account|acct)[_ -]?(?:no|number|id)\b\s*[:=]\s*\S+")),
     ("demat", re.compile(r"(?i)\b(?:demat|dp[_ -]?id|boid)\b\s*[:=]\s*\S+")),
     ("pan", re.compile(r"\b[A-Z]{5}[0-9]{4}[A-Z]\b")),
-    ("api_secret_label", re.compile(r"(?i)\b(?:api[_ -]?secret|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|app[_ -]?secret)\b\s*[:=]\s*\S+")),
-    ("password_label", re.compile(r"(?i)\bpassw(?:or)?d\b\s*[:=]\s*\S+")),
+    # Label patterns. `\b` is deliberately not used at the front: it does
+    # not match between two word characters, so `\bpassword` misses
+    # `SMTP_APP_PASSWORD` -- which is to say it missed every credential
+    # name this project actually uses. ENV_PREFIX absorbs that prefix.
+    ("api_secret_label", re.compile(
+        r"(?i)(?<![A-Za-z0-9])" + ENV_PREFIX +
+        r"(?:api[_ -]?secret|api[_ -]?key|access[_ -]?token|"
+        r"refresh[_ -]?token|app[_ -]?secret|client[_ -]?secret|"
+        r"auth[_ -]?token|secret[_ -]?key|private[_ -]?key)"
+        r"[A-Za-z0-9_]*\s*[:=]\s*\S+")),
+    ("password_label", re.compile(
+        r"(?i)(?<![A-Za-z0-9])" + ENV_PREFIX +
+        r"passw(?:or)?d[A-Za-z0-9_]*\s*[:=]\s*\S+")),
+    # Token shapes for the services this pipeline actually talks to. A
+    # label is not always present -- a token pasted into a log has none.
+    ("meta_access_token", re.compile(r"\bEAA[A-Za-z0-9]{20,}")),
+    ("google_oauth_refresh", re.compile(r"\b1//0[A-Za-z0-9_\-]{20,}")),
+    ("google_client_secret", re.compile(r"\bGOCSPX-[A-Za-z0-9_\-]{15,}")),
+    ("github_token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}")),
     # Absolute home paths leak the OS username.
     ("home_path", re.compile(r"/(?:Users|home)/[A-Za-z0-9._\-]+/")),
 )
@@ -42,6 +68,8 @@ STRIP_KEYS = frozenset({
     "demat", "dp_id", "boid", "pan", "api_key", "api_secret", "access_token",
     "refresh_token", "password", "order_id", "broker_order_id", "exchange_order_id",
     "capital", "total_capital", "available_margin",
+    "client_secret", "auth_token", "secret_key", "private_key",
+    "smtp_app_password", "ig_access_token", "gemini_api_key",
 })
 
 

@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import os
 import smtplib
-import socket
 from email.message import EmailMessage
 
 from . import scrub
@@ -98,7 +97,7 @@ def test_channel() -> tuple[bool, str]:
             "This is a test of the failure-alert channel.\n\n"
             "If you are reading it, a real break will reach you here too.",
         )
-    except (smtplib.SMTPException, socket.error, OSError) as exc:
+    except (smtplib.SMTPException, OSError) as exc:
         return False, f"{type(exc).__name__}: {exc}"
     return True, f"sent to {ch.to}"
 
@@ -130,7 +129,7 @@ def failure(episode_id: str | None, stage: str | None, exc: BaseException) -> No
     try:
         ch.send(subject, body)
         log.info("failure alert sent", extra={"to": ch.to})
-    except Exception as mail_exc:  # noqa: BLE001 - must not mask `exc`
+    except Exception as mail_exc:
         log.warning(
             "could not send failure alert: %s: %s",
             type(mail_exc).__name__, mail_exc,

@@ -5,8 +5,7 @@ from __future__ import annotations
 import pytest
 
 from pipeline.errors import ValidationError
-from pipeline.script_format import (parse, render, to_scenes,
-                                    validate_against_snapshot)
+from pipeline.script_format import parse, render, to_scenes, validate_against_snapshot
 
 GOOD = """# Title
 

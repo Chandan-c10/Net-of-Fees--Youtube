@@ -7,15 +7,18 @@ frozen snapshot reproduces the same image.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import matplotlib
+
 matplotlib.use("Agg")  # headless: no display needed, works identically on CI
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
 from pipeline.errors import StageError
+
 from . import style
 
 RENDERERS: dict[str, Callable[..., None]] = {}
@@ -138,7 +141,7 @@ def fee_stack(data: dict[str, Any], spec, type_scale, out_path: Path,
     ax.grid(axis="y", visible=False)
     span = max(full) or 1
     if reveal >= 0.999:
-        for bar, v in zip(bars, full):
+        for bar, v in zip(bars, full, strict=True):
             ax.text(v + span * 0.015, bar.get_y() + bar.get_height() / 2,
                     style.money(v, 2), color=style.INK, va="center",
                     fontsize=type_scale.annotation)
@@ -200,7 +203,7 @@ def drag_ladder(data: dict[str, Any], spec, type_scale, out_path: Path,
     ax.grid(axis="x", visible=False)
     top = max(d for d in drag if d is not None)
     if reveal >= 0.999:
-        for bar, d in zip(bars, drag):
+        for bar, d in zip(bars, drag, strict=True):
             if d is None:
                 continue
             ax.text(bar.get_x() + bar.get_width() / 2, d + top * 0.03,

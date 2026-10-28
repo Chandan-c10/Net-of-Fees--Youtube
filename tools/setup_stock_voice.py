@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from pipeline.voices.kokoro import KNOWN_VOICES  # noqa: E402
+from pipeline.voices.kokoro import KNOWN_VOICES
 
 CONSENT = """# Voice provenance - {name}
 
@@ -84,7 +84,7 @@ def main() -> int:
     print(f"Created voices/{name}/")
     print(f"  voice       {voice} - {KNOWN_VOICES[voice]}")
     print(f"  lexicon     {len(lex)} terms")
-    print(f"\nUse it:")
+    print("\nUse it:")
     print(f"  python run.py <id> --voice-engine kokoro --voice {name} "
           f"--stage voice --force")
     return 0

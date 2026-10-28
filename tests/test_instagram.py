@@ -89,7 +89,7 @@ def test_both_publish_targets_are_registered():
 
 
 def test_missing_vertical_cut_is_a_clear_error(episode, approved, metadata_file):
-    with pytest.raises(StageError, match="run the shorts stage"):
+    with pytest.raises(StageError, match=r"(?i)run the shorts stage"):
         instagram.run(episode, approved, dry_run=True)
 
 
@@ -187,7 +187,7 @@ def test_a_full_post_records_the_media_id(
 
     assert calls == ["create", "upload", "await"]
     assert approved.stage("instagram").data["media_id"] == "17900000000000002"
-    row = [r for r in approved.platform_posts if r["platform"] == "instagram"][0]
+    row = next(r for r in approved.platform_posts if r["platform"] == "instagram")
     assert row["status"] == "posted"
     assert row["external_id"] == "17900000000000002"
 
@@ -199,7 +199,7 @@ def test_a_failed_post_is_recorded_on_the_row(
                             StageError("container refused")))
     with pytest.raises(StageError, match="container refused"):
         instagram.run(episode, approved, which=1)
-    row = [r for r in approved.platform_posts if r["platform"] == "instagram"][0]
+    row = next(r for r in approved.platform_posts if r["platform"] == "instagram")
     assert row["status"] == "failed" and "container refused" in row["error"]
 
 
@@ -230,3 +230,28 @@ def test_a_container_error_explains_the_format_requirements(
 class _NullLog:
     def debug(self, *a, **k): pass
     def info(self, *a, **k): pass
+
+
+# ---- input validation -------------------------------------------------
+
+
+@pytest.mark.parametrize("which", [0, -1, -99])
+def test_a_reel_number_below_one_is_refused(episode, which):
+    """The cuts are numbered from 1; asking for 0 is a mistake, not a
+    missing file."""
+    with pytest.raises(ConfigError, match="must be 1 or higher"):
+        instagram.reel_path(episode, which)
+
+
+def test_an_out_of_range_reel_lists_what_exists(episode, rendered_reel):
+    episode.shorts_dir.mkdir(parents=True, exist_ok=True)
+    for n in (1, 2):
+        (episode.shorts_dir / f"short_{n:02d}.mp4").write_bytes(
+            rendered_reel.read_bytes())
+    with pytest.raises(StageError, match=r"short_01\.mp4"):
+        instagram.reel_path(episode, 9)
+
+
+def test_a_missing_shorts_dir_says_to_run_the_stage(episode):
+    with pytest.raises(StageError, match="Run the shorts stage first"):
+        instagram.reel_path(episode, 1)

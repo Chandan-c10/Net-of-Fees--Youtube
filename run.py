@@ -27,16 +27,25 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import profiles
 from pipeline import config, logging_setup, notify
 from pipeline.errors import ConfigError, GateError, PipelineError
 from pipeline.manifest import PUBLISH_STAGES, STAGES, Episode, Manifest
 from pipeline.recipes import available as available_recipes
-from pipeline.stages import (assemble, captions, charts, export, finish,
-                             instagram, metadata, script_gen, shorts,
-                             thumbnail, upload, voice)
-
-import profiles
-
+from pipeline.stages import (
+    assemble,
+    captions,
+    charts,
+    export,
+    finish,
+    instagram,
+    metadata,
+    script_gen,
+    shorts,
+    thumbnail,
+    upload,
+    voice,
+)
 
 # An episode id becomes a directory name, and since a scheduled run can
 # supply one from a workflow input, it is validated rather than trusted.
@@ -142,8 +151,11 @@ def cmd_new(args) -> int:
         print(f"episode {episode_id} already exists; use --force to overwrite",
               file=sys.stderr)
         return 1
-    ep.ensure_dirs()
     settings = config.load()
+    # Fail on a bad profile here rather than three stages later: loading it
+    # is the only way to know the name is real.
+    profiles.load(args.profile or settings.profile)
+    ep.ensure_dirs()
     m = Manifest.new(
         episode_id,
         recipe=args.recipe,
@@ -301,8 +313,7 @@ def cmd_list(args) -> int:
 
 def cmd_voices(args) -> int:
     """List voices: the stock ones available, and any configured locally."""
-    from pipeline.voices.kokoro import (DEFAULT_VOICE, available_voices,
-                                        is_installed)
+    from pipeline.voices.kokoro import DEFAULT_VOICE, available_voices, is_installed
 
     print("\n  Stock voices (Kokoro-82M, Apache 2.0, commercial use OK)")
     print(f"  kokoro installed: {'yes' if is_installed() else 'no - pip install -r requirements-voice.txt'}\n")

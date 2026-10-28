@@ -1,0 +1,33 @@
+# Lint rules this project holds itself to. Kept narrow on purpose: the
+# value is catching real defects, not enforcing taste.
+line-length = 100
+exclude = [".venv", "episodes", "__pycache__"]
+
+[lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes: undefined names, unused imports
+    "I",         # import order
+    "UP",        # outdated idioms
+    "B",         # bugbear: mutable defaults, shadowed loop vars
+    "ISC",       # a missing comma between two strings in a list
+    "RUF",       # ruff's own, incl. unused noqa
+    "PLW",       # pylint warnings
+    "C4",        # comprehension misuse
+]
+ignore = [
+    "E501",      # line length is advisory here; comments carry reasoning
+    "B008",      # dataclass field(default_factory=...) is the point
+    # Deliberate, each checked once by hand:
+    "ISC004",    # line-wrapped prose in a list, not a missing comma
+    "PLW1510",   # subprocess.run whose returncode is handled explicitly
+    "PLW2901",   # captions.py clamps a zero-length cue on purpose
+]
+
+[lint.per-file-ignores]
+# run.py and tools/ insert the project root on sys.path before importing
+# from it, so those imports cannot come first.
+"run.py" = ["E402"]
+"tools/*" = ["E402"]
+# Tests plant fake secrets and build hostile inputs on purpose.
+"tests/*" = ["S105", "S106", "RUF012"]

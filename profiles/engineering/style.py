@@ -7,7 +7,8 @@ section 10.
 
 from __future__ import annotations
 
-from profiles.trading.style import TypeScale, rc_params as _rc  # shared shape
+from profiles.trading.style import TypeScale  # shared shape
+from profiles.trading.style import rc_params as _rc
 
 INK = "#E6EDF3"
 INK_DIM = "#8B949E"

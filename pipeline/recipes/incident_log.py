@@ -62,7 +62,7 @@ class IncidentLogRecipe:
                 )
 
         by_layer: dict[str, int] = {}
-        by_severity: dict[str, int] = {s: 0 for s in SEVERITIES}
+        by_severity: dict[str, int] = dict.fromkeys(SEVERITIES, 0)
         by_detection: dict[str, int] = {}
         for inc in incidents:
             by_layer[inc["layer"]] = by_layer.get(inc["layer"], 0) + 1

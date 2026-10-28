@@ -84,7 +84,7 @@ def build_filter(look: Look, spec: VideoSpec, duration: float) -> str:
     if look.vignette_strength > 0:
         # PI/5 is a wide, soft falloff. Narrower angles look like a lens
         # fault rather than a deliberate grade.
-        parts.append(f"vignette=angle=PI/5:mode=forward")
+        parts.append("vignette=angle=PI/5:mode=forward")
 
     if look.grain > 0:
         # Temporal grain only: static noise looks like a dirty sensor.

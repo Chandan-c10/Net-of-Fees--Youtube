@@ -10,8 +10,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..config import (AUDIO_CHANNELS, AUDIO_SAMPLE_RATE, LOUDNESS_RANGE,
-                      LOUDNESS_TARGET_LUFS, LOUDNESS_TRUE_PEAK)
+from ..config import (
+    AUDIO_CHANNELS,
+    AUDIO_SAMPLE_RATE,
+    LOUDNESS_RANGE,
+    LOUDNESS_TARGET_LUFS,
+    LOUDNESS_TRUE_PEAK,
+)
 from ..errors import StageError
 from ..logging_setup import get
 from ..manifest import Episode, Manifest

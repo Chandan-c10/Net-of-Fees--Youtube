@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from pipeline.errors import GateError
+import run
+from pipeline.errors import ConfigError, GateError
 from pipeline.manifest import GATE_1_STAGES, GATE_2_STAGES
 from pipeline.stages.upload import assert_publishable
 
@@ -72,22 +73,15 @@ def test_there_is_no_gate_skip_flag():
 # A scheduled run supplies the id from a workflow input, so it reaches a
 # filesystem path from outside the repo.
 
-import pytest as _pytest
-
-from pipeline.errors import ConfigError as _ConfigError
-
-import run as _run
-
-
-@_pytest.mark.parametrize("bad", [
+@pytest.mark.parametrize("bad", [
     "../etc", "a/b", "a\\b", "with space", "x$y", "", "." , "..",
     "x" * 33, "-leading-dash",
 ])
 def test_a_dangerous_episode_id_is_refused(bad):
-    with _pytest.raises(_ConfigError):
-        _run._episode(bad)
+    with pytest.raises(ConfigError):
+        run._episode(bad)
 
 
-@_pytest.mark.parametrize("good", ["001", "20261028-am", "ep_7", "A1"])
+@pytest.mark.parametrize("good", ["001", "20261028-am", "ep_7", "A1"])
 def test_a_reasonable_episode_id_is_accepted(good):
-    assert _run._episode(good).dir.name == good
+    assert run._episode(good).dir.name == good
