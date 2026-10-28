@@ -18,3 +18,9 @@ HASHTAGS = (
     "#backtesting", "#fintech", "#systemsdesign", "#tradingsystems",
     "#devlog", "#buildinpublic", "#distributedsystems", "#sre",
 )
+
+# YouTube file this under a category, which is a separate field
+# from the tags and the hashtags. Science & Technology.
+YOUTUBE_CATEGORY_ID = "28"
+# Helps YouTube offer auto-translated titles and captions.
+LANGUAGE = "en"

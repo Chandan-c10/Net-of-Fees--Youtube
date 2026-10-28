@@ -17,3 +17,9 @@ HASHTAGS = (
     "#stockmarketindia", "#tradingeducation", "#riskmanagement",
     "#derivatives", "#tradingpsychology",
 )
+
+# YouTube file this under a category, which is a separate field
+# from the tags and the hashtags. Education -- this is finance education, not advice.
+YOUTUBE_CATEGORY_ID = "27"
+# Helps YouTube offer auto-translated titles and captions.
+LANGUAGE = "en"

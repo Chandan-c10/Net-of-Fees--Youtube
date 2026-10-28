@@ -59,14 +59,106 @@ def assert_publishable(m: Manifest) -> None:
         raise GateError(f"episode {m.id} has no assembled video")
 
 
+# People & Blogs. Used only when a profile declares nothing, which
+# should not happen -- tests/test_profiles.py asserts every profile does.
+FALLBACK_CATEGORY_ID = "22"
+
+# YouTube's own limits on the fields below.
+DESCRIPTION_MAX = 5000
+TAGS_TOTAL_MAX = 480          # the documented cap is 500; leave headroom
+TAG_MAX = 30
+
+
 def build_description(m: Manifest, data: dict | None = None) -> str:
-    """Description with the disclaimer. Section 14 requires it on every video."""
+    """Fallback description, used only when the metadata stage has not run.
+
+    Section 14 requires the disclaimer on every video, so it is here as
+    well as in the metadata stage's own text.
+    """
     parts = [m.title, ""]
     if data and data.get("verify_before_publish"):
         parts.append("Rates used are the published schedules at time of recording.")
         parts.append("")
     parts += [DISCLAIMER, "", f"Episode {m.id}"]
     return "\n".join(parts)
+
+
+def _snippet_extras(m: Manifest) -> dict:
+    """Category and language, taken from the profile rather than fixed.
+
+    The category was hardcoded, which meant switching topic left the
+    video filed under the previous topic's category.
+    """
+    try:
+        import profiles
+        profile = profiles.load(m.profile)
+    except Exception:  # a missing profile is the render's problem, not this
+        return {"categoryId": FALLBACK_CATEGORY_ID}
+    extras = {
+        "categoryId": getattr(profile, "YOUTUBE_CATEGORY_ID",
+                              FALLBACK_CATEGORY_ID),
+    }
+    language = getattr(profile, "LANGUAGE", None)
+    if language:
+        extras["defaultLanguage"] = language
+        extras["defaultAudioLanguage"] = language
+    return extras
+
+
+def load_metadata(ep: Episode) -> dict:
+    """What the metadata stage wrote, or {} if it has not run."""
+    path = ep.dir / "metadata.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def youtube_description(ep: Episode, m: Manifest,
+                        data: dict | None = None) -> str:
+    """The description that actually goes out.
+
+    Prefers the metadata stage's text, which carries the hook, the series
+    line and the chapter list. That text was being generated and thrown
+    away: upload built its own minimal version instead.
+
+    The disclaimer is appended if the chosen text does not already carry
+    it, because section 14 requires it on every video and a profile could
+    word its own differently.
+    """
+    meta = load_metadata(ep).get("youtube", {})
+    text = (meta.get("description") or "").strip()
+    if not text:
+        return build_description(m, data)
+    if "not investment advice" not in text.lower():
+        text += "\n\n" + DISCLAIMER
+    if f"Episode {m.id}" not in text:
+        text += f"\n\nEpisode {m.id}"
+    return text
+
+
+def youtube_tags(ep: Episode) -> list[str]:
+    """Tags from the metadata stage, trimmed to YouTube's total budget.
+
+    These were generated and never sent: the insert body had no tags
+    field at all.
+    """
+    raw = load_metadata(ep).get("youtube", {}).get("tags", [])
+    tags, total = [], 0
+    for tag in raw:
+        tag = str(tag).lstrip("#").strip()
+        if not tag or len(tag) > TAG_MAX:
+            continue
+        # Quoted length is what counts against the cap once a tag has a
+        # space in it, so budget for the quotes.
+        cost = len(tag) + (3 if " " in tag else 1)
+        if total + cost > TAGS_TOTAL_MAX:
+            break
+        tags.append(tag)
+        total += cost
+    return tags
 
 
 def _record_attempt(m: Manifest, platform: str) -> dict:
@@ -172,7 +264,9 @@ def run(ep: Episode, m: Manifest, dry_run: bool = False,
     data = (json.loads(ep.snapshot.read_text(encoding="utf-8"))
             if ep.snapshot.exists() else None)
     row = _record_attempt(m, "youtube")
-    description = build_description(m, data) + f"\n\nref: {row['idempotency_key']}"
+    description = (youtube_description(ep, m, data)
+                   + f"\n\nref: {row['idempotency_key']}")
+    tags = youtube_tags(ep)
 
     if dry_run:
         log.info("dry run: nothing uploaded")
@@ -182,6 +276,13 @@ def run(ep: Episode, m: Manifest, dry_run: bool = False,
         print(f"    title     {m.title}")
         print(f"    privacy   {privacy}")
         print(f"    quota     ~{QUOTA_COST_PER_UPLOAD} of {DAILY_QUOTA}/day")
+        print(f"    tags      {len(tags)}: {', '.join(tags) or 'none'}")
+        thumb = ("none chosen" if m.chosen_thumbnail is None
+                 else f"thumb_{m.chosen_thumbnail}.png")
+        print(f"    thumbnail {thumb}")
+        extras = _snippet_extras(m)
+        print(f"    category  {extras['categoryId']}"
+              f"  language {extras.get('defaultLanguage', 'unset')}")
         print(f"\n  description:\n{description}\n")
         m.mark_done("upload", dry_run=True)
         return
@@ -202,8 +303,9 @@ def run(ep: Episode, m: Manifest, dry_run: bool = False,
     body = {
         "snippet": {
             "title": m.title[:100],
-            "description": description[:5000],
-            "categoryId": "22",
+            "description": description[:DESCRIPTION_MAX],
+            "tags": tags,
+            **_snippet_extras(m),
         },
         "status": {
             "privacyStatus": privacy,
@@ -232,5 +334,6 @@ def run(ep: Episode, m: Manifest, dry_run: bool = False,
     _set_thumbnail(youtube, ep, m, video_id, log)
     row.update(status="posted", external_id=video_id, posted_at=_now())
     m.published_at = row["posted_at"]
-    m.mark_done("upload", video_id=video_id, privacy=privacy)
+    m.mark_done("upload", video_id=video_id, privacy=privacy,
+                tags=len(tags))
     log.info(f"published {video_id} ({privacy})")

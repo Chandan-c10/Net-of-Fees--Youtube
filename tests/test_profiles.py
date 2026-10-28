@@ -120,3 +120,23 @@ def test_an_unknown_profile_names_the_ones_that_exist():
         profiles.load("nosuchprofile")
     message = str(exc.value)
     assert "trading" in message and "engineering" in message
+
+
+# ---- every profile must declare how YouTube should file its videos ----
+# The category was hardcoded in upload.py, so switching topic left the
+# video filed under the previous topic's category.
+
+VALID_CATEGORIES = {"22", "24", "26", "27", "28"}
+
+
+@pytest.mark.parametrize("name", ALL_PROFILES)
+def test_every_profile_declares_a_youtube_category(name):
+    profile = profiles.load(name)
+    category = getattr(profile, "YOUTUBE_CATEGORY_ID", None)
+    assert category, f"{name} declares no YOUTUBE_CATEGORY_ID"
+    assert category in VALID_CATEGORIES, f"{name}: {category} is not a id we use"
+
+
+@pytest.mark.parametrize("name", ALL_PROFILES)
+def test_every_profile_declares_a_language(name):
+    assert getattr(profiles.load(name), "LANGUAGE", None)
