@@ -108,12 +108,36 @@ right length. It exists so you can verify assembly, timing and captions
 before downloading any model. **Draft audio can never be published** —
 gate 2 and the upload stage both refuse it.
 
-To use your real voice:
+### An interim voice, before you record
 
-1. Record 30–60 minutes into `voices/chandan_en/reference/`.
-   One session, one room, one mic position. Varied sentences at natural
-   pace, heavy on the vocabulary you actually use: F&O, STT, Nifty, crore,
-   lakh, brokerage, expiry.
+Kokoro ships named stock voices under Apache 2.0 - commercial use is
+permitted, and they are model voices rather than clones of anyone.
+
+```bash
+pip install -r requirements-voice.txt
+python run.py voices                          # see them all
+python tools/setup_stock_voice.py af_heart    # pick one
+python run.py 001 --voice-engine kokoro --voice stock_af_heart \
+               --stage voice --force
+```
+
+Output from a stock voice **can** be published. Only the `silent` draft
+engine cannot.
+
+**Never clone a voice found online.** A creator's voice, a public
+figure's, anyone's - that is impersonation under YouTube policy and
+carries personality-rights exposure. Section 14 of the architecture doc
+makes it a hard rule, and `consent.md` enforces it per voice.
+
+### To use your real voice
+
+1. Generate your recording script and follow it:
+   ```bash
+   python tools/make_voice_script.py > voices/chandan_en/RECORDING.md
+   ```
+   45-60 minutes, one session, one room, one mic position. Five blocks:
+   warm-up, your real scripts, vocabulary and numbers, delivery range,
+   and unscripted speech. **Leave your breaths in.**
 2. **Confirm your cloning model's checkpoint licence permits commercial
    use.** Several good open models (XTTS-v2, some F5-TTS and Fish Speech
    checkpoints) are non-commercial and would be a licence violation on a

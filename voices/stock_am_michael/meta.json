@@ -1,0 +1,10 @@
+{
+  "name": "stock_am_michael",
+  "engine": "kokoro",
+  "voice": "am_michael",
+  "description": "American male, steady and neutral",
+  "language": "en",
+  "licence": "Apache-2.0",
+  "is_clone_of_real_person": false,
+  "interim": true
+}

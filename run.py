@@ -63,6 +63,8 @@ def _run_stage(name: str, ep: Episode, m: Manifest, settings, args) -> None:
         assert_clean([ep.snapshot, ep.script])
         m.mark_done("scrub", findings=0)
     elif name == "voice":
+        if getattr(args, "voice", None):
+            m.voice = args.voice
         voice.run(ep, m, engine_name=args.voice_engine)
     elif name == "charts":
         charts.run(ep, m, profile)
@@ -278,6 +280,34 @@ def cmd_list(args) -> int:
     return 0
 
 
+def cmd_voices(args) -> int:
+    """List voices: the stock ones available, and any configured locally."""
+    from pipeline.voices.kokoro import (DEFAULT_VOICE, available_voices,
+                                        is_installed)
+
+    print("\n  Stock voices (Kokoro-82M, Apache 2.0, commercial use OK)")
+    print(f"  kokoro installed: {'yes' if is_installed() else 'no - pip install -r requirements-voice.txt'}\n")
+    for name, desc in available_voices().items():
+        mark = " (default)" if name == DEFAULT_VOICE else ""
+        print(f"    {name:<13}{desc}{mark}")
+
+    print("\n  Configured locally")
+    configured = sorted(d for d in config.VOICES_DIR.iterdir()
+                        if d.is_dir()) if config.VOICES_DIR.exists() else []
+    if not configured:
+        print("    none")
+    for d in configured:
+        consent = "consent.md" if (d / "consent.md").exists() else "NO CONSENT"
+        refs = len(list((d / "reference").glob("*"))) if (d / "reference").exists() else 0
+        refs = max(0, refs - 1)  # discount .gitkeep
+        print(f"    {d.name:<20} {consent:<12} {refs} reference file(s)")
+
+    print("\n  Add a stock voice:  python tools/setup_stock_voice.py <voice>")
+    print("  A voice is never cloned from a real person without their")
+    print("  documented consent -- architecture doc, section 14.\n")
+    return 0
+
+
 def cmd_doctor(args) -> int:
     from pipeline.platform_support import describe_environment, ffmpeg_available
     env = describe_environment()
@@ -325,6 +355,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("list", help="list episodes").set_defaults(func=cmd_list)
     sub.add_parser("doctor", help="check the environment").set_defaults(func=cmd_doctor)
+    sub.add_parser("voices", help="list available voices").set_defaults(func=cmd_voices)
 
     st = sub.add_parser("status", help="show one episode")
     st.add_argument("id")
@@ -338,7 +369,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # `run.py 001 ...` is the common path; route it without a subcommand.
     if argv and not argv[0].startswith("-") and argv[0] not in {
-        "new", "list", "status", "doctor"
+        "new", "list", "status", "doctor", "voices"
     }:
         rp = argparse.ArgumentParser(prog="run.py <id>")
         rp.add_argument("id")
@@ -357,7 +388,9 @@ def main(argv: list[str] | None = None) -> int:
         rp.add_argument("--no-music", action="store_true")
         rp.add_argument("--look", default="clean",
                         choices=("clean", "filmic", "none"))
-        rp.add_argument("--voice-engine", default=config.load().voice_engine)
+        rp.add_argument("--voice-engine", default=config.load().voice_engine,
+                        choices=("silent", "kokoro", "cloned"))
+        rp.add_argument("--voice", default=None)
         rp.add_argument("--script-engine", default=config.load().script_engine)
         rp.add_argument("--captions", default="derive", choices=("derive", "whisper"))
         rp.add_argument("--params")

@@ -86,3 +86,43 @@ def test_voice_consent_is_enforced(tmp_path):
 
     (unconsented / "consent.md").write_text("Granted by the speaker, 2026-10-28.")
     assert_consented(unconsented)
+
+
+def test_stock_voice_is_publishable_but_draft_is_not():
+    """A licensed stock voice may publish; the draft engine may never."""
+    from pipeline.voices import get_engine
+
+    draft = get_engine("silent")
+    assert draft.draft is True, "silent engine must be marked draft"
+
+    from pipeline.voices.kokoro import KokoroVoice
+    assert KokoroVoice.draft is False, "a licensed stock voice is publishable"
+
+
+def test_unknown_stock_voice_is_rejected():
+    from pipeline.errors import ConfigError
+    from pipeline.voices.kokoro import KokoroVoice
+
+    with pytest.raises(ConfigError, match="unknown Kokoro voice"):
+        KokoroVoice(voice="someone_from_youtube")
+
+
+def test_stock_voice_records_it_is_not_a_clone(tmp_path):
+    """Provenance must state plainly that no real person was copied."""
+    import json
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    d = root / "voices" / "stock_am_michael"
+    if not d.exists():
+        pytest.skip("stock voice not set up in this checkout")
+
+    meta = json.loads((d / "meta.json").read_text())
+    assert meta["is_clone_of_real_person"] is False
+    assert meta["licence"] == "Apache-2.0"
+
+    consent = (d / "consent.md").read_text().lower()
+    assert "not a clone of any real person" in consent
+    assert "impersonation" in consent, "the rule it does not bend must be stated"

@@ -21,7 +21,14 @@ def run(ep: Episode, m: Manifest, engine_name: str = "silent",
     if not m.scenes:
         raise StageError("no scenes; run the script stage first")
 
-    engine = get_engine(engine_name, episode_id=m.id)
+    kwargs: dict[str, object] = {"episode_id": m.id}
+    if engine_name == "kokoro":
+        # A stock voice directory records which model voice it maps to.
+        meta = VOICES_DIR / m.voice / "meta.json"
+        if meta.exists():
+            import json
+            kwargs["voice"] = json.loads(meta.read_text()).get("voice", "am_michael")
+    engine = get_engine(engine_name, **kwargs)
     ep.audio_dir.mkdir(parents=True, exist_ok=True)
 
     # Consent is enforced, not trusted. The draft engine is exempt because

@@ -9,9 +9,13 @@
 torch>=2.2            # MPS on Apple Silicon, CUDA on Windows with NVIDIA
 soundfile>=0.12
 
-# Pick ONE voice engine:
+# Interim stock voices -- Apache 2.0, commercial use permitted, and not a
+# clone of any real person. Use these until a personal reference exists.
+kokoro>=0.9
+numpy>=1.26
+
+# Cloning, for your own voice only. CONFIRM THE CHECKPOINT LICENCE first:
 # chatterbox-tts      # MIT licensed - the starting candidate
-# kokoro>=0.9         # fallback, fixed voices, no cloning
 
 # Caption timing with true word-level timestamps
 faster-whisper>=1.0
