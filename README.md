@@ -270,6 +270,41 @@ approve an episode. Publishing for real needs a typed confirmation.
 Assets are served only from inside the episode directory, and only
 images, video, audio and captions — never a manifest or a token file.
 
+## Several channels from one install
+
+One checkout, one schedule, several content streams. A profile publishes
+to the channel named after it, so `engineering` goes to the engineering
+channel and `trading` to the trading one. A `_shorts` profile posts to
+its parent's channel, since the vertical sibling exists to repost the
+same content rather than to be a separate account.
+
+Authorise each one:
+
+```
+python tools/youtube_auth.py                      # the default channel
+python tools/youtube_auth.py --channel trading    # a second channel
+```
+
+That writes `secrets/youtube_token_trading.json`, which is picked up
+automatically. For Instagram, suffix the variables with the channel name
+in capitals:
+
+```
+IG_USER_ID_TRADING=...
+IG_ACCESS_TOKEN_TRADING=...
+```
+
+Every credential is looked up per channel first and falls back to the
+unsuffixed name, so an existing single-channel setup keeps working with
+no changes. To point several profiles at one account, have them declare
+the same `CHANNEL` in their `__init__.py`.
+
+Check what is wired up:
+
+```
+python run.py doctor
+```
+
 ## Alerts
 
 The pipeline mails you when a stage fails, so an unattended run cannot

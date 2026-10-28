@@ -13,11 +13,10 @@ reconcile before re-uploading.
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from datetime import UTC, datetime
-from pathlib import Path
 
+from .. import channels
 from ..errors import ConfigError, GateError, StageError
 from ..logging_setup import get
 from ..manifest import Episode, Manifest
@@ -202,7 +201,7 @@ def _reconcile(youtube, row: dict, m: Manifest) -> str | None:
     return None
 
 
-def _client():
+def _client(channel: str = "default"):
     try:
         from google.auth.transport.requests import Request
         from google.oauth2.credentials import Credentials
@@ -213,12 +212,13 @@ def _client():
             "  pip install google-api-python-client google-auth-oauthlib"
         ) from exc
 
-    token_path = Path(os.getenv("YOUTUBE_TOKEN_FILE", "secrets/youtube_token.json"))
+    token_path = channels.youtube_token_path(channel)
     if not token_path.exists():
         raise ConfigError(
-            f"no YouTube credentials at {token_path}.\n"
-            f"  Run: python tools/youtube_auth.py\n"
-            f"  See README, 'YouTube setup'."
+            f"no YouTube credentials at {token_path} for channel "
+            f"{channel!r}.\n"
+            f"  Run: python tools/youtube_auth.py --channel {channel}\n"
+            f"  See README, 'Several channels from one install'."
         )
     creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
     if creds.expired and creds.refresh_token:
@@ -263,6 +263,7 @@ def run(ep: Episode, m: Manifest, dry_run: bool = False,
 
     data = (json.loads(ep.snapshot.read_text(encoding="utf-8"))
             if ep.snapshot.exists() else None)
+    channel = channels.key_for(m)
     row = _record_attempt(m, "youtube")
     description = (youtube_description(ep, m, data)
                    + f"\n\nref: {row['idempotency_key']}")
@@ -283,13 +284,15 @@ def run(ep: Episode, m: Manifest, dry_run: bool = False,
         extras = _snippet_extras(m)
         print(f"    category  {extras['categoryId']}"
               f"  language {extras.get('defaultLanguage', 'unset')}")
+        print(f"    channel   {channel} "
+              f"({channels.youtube_token_path(channel)})")
         print(f"\n  description:\n{description}\n")
         m.mark_done("upload", dry_run=True)
         return
 
     from googleapiclient.http import MediaFileUpload
 
-    youtube = _client()
+    youtube = _client(channel)
 
     if row.get("attempts", 1) > 1 and not row.get("external_id"):
         found = _reconcile(youtube, row, m)
@@ -335,5 +338,5 @@ def run(ep: Episode, m: Manifest, dry_run: bool = False,
     row.update(status="posted", external_id=video_id, posted_at=_now())
     m.published_at = row["posted_at"]
     m.mark_done("upload", video_id=video_id, privacy=privacy,
-                tags=len(tags))
+                tags=len(tags), channel=channel)
     log.info(f"published {video_id} ({privacy})")

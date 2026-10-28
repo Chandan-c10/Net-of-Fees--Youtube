@@ -28,7 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import profiles
-from pipeline import config, dashboard, gates, logging_setup, notify
+from pipeline import channels, config, dashboard, gates, logging_setup, notify
 from pipeline.errors import ConfigError, PipelineError
 from pipeline.manifest import PUBLISH_STAGES, STAGES, Episode, Manifest
 from pipeline.recipes import available as available_recipes
@@ -316,6 +316,15 @@ def cmd_doctor(args) -> int:
     for k, v in env.items():
         print(f"    {k:<18} {v}")
     print(f"\n    recipes            {', '.join(available_recipes())}")
+    print(f"    profiles           {', '.join(profiles.available())}")
+
+    # Which account each content stream publishes to, and whether its
+    # credentials are in place. Presence only, never a value.
+    print("\n  Channels\n")
+    for key in channels.known():
+        info = channels.describe(key)
+        print(f"    {info['channel']:<18} youtube: {info['youtube']}")
+        print(f"    {'':<18} instagram: {info['instagram']}")
 
     problems = []
     if not ffmpeg_available():

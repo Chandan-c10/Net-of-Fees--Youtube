@@ -34,7 +34,7 @@ import urllib.parse
 import urllib.request
 from datetime import UTC
 
-from .. import platform_support
+from .. import channels, platform_support
 from ..errors import ConfigError, StageError
 from ..logging_setup import get
 from ..manifest import Episode, Manifest
@@ -81,14 +81,16 @@ def _version() -> str:
     return os.getenv("IG_API_VERSION", DEFAULT_VERSION)
 
 
-def _credentials() -> tuple[str, str]:
-    user_id = os.getenv("IG_USER_ID")
-    token = os.getenv("IG_ACCESS_TOKEN")
-    missing = [n for n, v in (("IG_USER_ID", user_id),
-                              ("IG_ACCESS_TOKEN", token)) if not v]
+def _credentials(channel: str = "default") -> tuple[str, str]:
+    """This channel's account, falling back to the single-channel vars."""
+    user_id, token = channels.instagram_credentials(channel)
+    suffix = f"_{channel.upper()}"
+    missing = [n for n, v in ((f"IG_USER_ID{suffix}", user_id),
+                              (f"IG_ACCESS_TOKEN{suffix}", token)) if not v]
     if missing:
         raise ConfigError(
-            f"Instagram is not configured: {', '.join(missing)} not set.\n"
+            f"Instagram is not configured for channel {channel!r}: "
+            f"{', '.join(missing)} not set (nor the unsuffixed names).\n"
             "  See README, 'Instagram setup'. Skip this stage with "
             "--no-instagram."
         )
@@ -372,7 +374,8 @@ def run(ep: Episode, m: Manifest, dry_run: bool = False,
         m.mark_done("instagram", dry_run=True)
         return
 
-    user_id, token = _credentials()
+    channel = channels.key_for(m)
+    user_id, token = _credentials(channel)
     video_url = os.getenv("IG_VIDEO_URL") or None
 
     if row.get("attempts", 1) > 1 and not row.get("external_id"):
@@ -404,5 +407,6 @@ def run(ep: Episode, m: Manifest, dry_run: bool = False,
     from datetime import datetime
     row.update(status="posted", external_id=media_id,
                posted_at=datetime.now(UTC).isoformat())
-    m.mark_done("instagram", media_id=media_id, file=path.name, **probed)
+    m.mark_done("instagram", media_id=media_id, file=path.name,
+                channel=channel, **probed)
     log.info(f"posted reel {media_id}")

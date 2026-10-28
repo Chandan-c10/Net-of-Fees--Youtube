@@ -14,16 +14,29 @@ the audit early -- it has the longest lead time of anything in setup.
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 ROOT = Path(__file__).resolve().parent.parent
 CLIENT_SECRET = ROOT / "secrets" / "client_secret.json"
-TOKEN = ROOT / "secrets" / "youtube_token.json"
+
+
+def token_path(channel: str | None) -> Path:
+    """Where to save. A channel gets its own file so one install can
+    publish to several accounts -- see README, 'Several channels'."""
+    if not channel:
+        return ROOT / "secrets" / "youtube_token.json"
+    return ROOT / "secrets" / f"youtube_token_{channel.lower()}.json"
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--channel", help="authorise a second channel, e.g. "
+                                          "--channel trading")
+    args = parser.parse_args()
+    TOKEN = token_path(args.channel)
     try:
         from google_auth_oauthlib.flow import InstalledAppFlow
     except ImportError:
@@ -41,6 +54,8 @@ def main() -> int:
     TOKEN.write_text(creds.to_json(), encoding="utf-8")
     TOKEN.chmod(0o600)  # the refresh token is precious; keep it off other users
     print(f"\nSaved {TOKEN}")
+    if args.channel:
+        print(f"Profiles whose channel is {args.channel!r} will use it.")
     print("This file is a credential. It is gitignored. Back it up securely.")
     return 0
 

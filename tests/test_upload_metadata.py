@@ -143,6 +143,8 @@ def test_the_insert_body_carries_the_tags(with_metadata, manifest, monkeypatch):
             return None, {"id": "VID123"}
 
     class FakeYouTube:
+        def __init__(self, *a, **k):      # _client takes a channel now
+            pass
         def videos(self):
             return FakeVideos()
         def thumbnails(self):
@@ -191,6 +193,8 @@ def test_the_chosen_thumbnail_is_set_after_upload(with_metadata, manifest,
                 "next_chunk": lambda self: (None, {"id": "VID9"})})()
 
     class FakeYouTube:
+        def __init__(self, *a, **k):      # _client takes a channel now
+            pass
         def videos(self):
             return FakeVideos()
         def thumbnails(self):

@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .env
 secrets/
+secrets/youtube_token_*.json
 episodes/*/
 !episodes/.gitkeep
 voices/*/reference/*
