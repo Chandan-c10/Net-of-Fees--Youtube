@@ -152,6 +152,14 @@ def validate_against_snapshot(scenes: list[Scene], snapshot: dict,
     hardcoded here, so adding a chart to a profile needs no change to this
     module.
     """
+    # A picture profile does not derive its frame from the data, so a
+    # scene's data_key carries no promise it has to keep. Asking the
+    # profile is the point of this check; a profile that binds nothing
+    # says so rather than being special-cased here.
+    if profile is not None and not getattr(
+            profile.visuals, "binds_data_keys", lambda: True)():
+        return
+
     renderable: set[str] = set()
     if profile is not None:
         try:

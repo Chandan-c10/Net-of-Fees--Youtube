@@ -40,13 +40,14 @@ CHANNEL_KEY = re.compile(r"^[a-z0-9][a-z0-9_]{0,31}$")
 def key_for(m: Manifest) -> str:
     """The channel this episode publishes to.
 
-    A profile may declare CHANNEL to share one account across several
-    profiles -- a long-form profile and its _shorts sibling usually post
-    to the same channel.
+    A profile may declare PUBLISH_TO to share one account across several
+    profiles. Named that rather than CHANNEL because style.CHANNEL is
+    already the brand string shown in a footer, and two different things
+    under one name is how the wrong one gets read.
     """
     try:
         import profiles
-        declared = getattr(profiles.load(m.profile), "CHANNEL", None)
+        declared = getattr(profiles.load(m.profile), "PUBLISH_TO", None)
     except Exception:
         declared = None
     key = (declared or m.profile or "default").lower()

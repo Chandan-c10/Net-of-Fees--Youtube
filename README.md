@@ -297,7 +297,7 @@ IG_ACCESS_TOKEN_TRADING=...
 Every credential is looked up per channel first and falls back to the
 unsuffixed name, so an existing single-channel setup keeps working with
 no changes. To point several profiles at one account, have them declare
-the same `CHANNEL` in their `__init__.py`.
+the same `PUBLISH_TO` in their `__init__.py`.
 
 Check what is wired up:
 

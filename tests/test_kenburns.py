@@ -236,3 +236,16 @@ def test_a_missing_source_is_a_clear_error(tmp_path):
     with pytest.raises(StageError, match="no source image"):
         kenburns.render(tmp_path / "nope.png", tmp_path / "o.mp4",
                         3.0, LONGFORM)
+
+
+def test_the_motion_assembler_plans_moves_across_the_episode():
+    """kenburns.render picks its own move when given none, with nothing
+    to avoid, so a seven-scene episode rendered drift_left three times.
+    The assembler must plan them together."""
+    import inspect
+
+    from pipeline.stages import motion_assemble
+    source = inspect.getsource(motion_assemble.run)
+    assert "plan_moves" in source, "the assembler must use plan_moves"
+    assert "choose_move" not in source, \
+        "picking per scene has nothing to avoid"

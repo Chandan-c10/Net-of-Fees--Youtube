@@ -128,3 +128,48 @@ def build_frames(cues: list[Cue], chart_for_scene, spec: VideoSpec,
         )
         frames.append((frame, cue.duration))
     return frames
+
+
+def render_caption_strip(text: str, spec: VideoSpec, out: Path) -> Path:
+    """The caption band alone, on transparency.
+
+    The chart path composites captions onto each still, which works
+    because the still does not change. Over moving footage the background
+    changes every frame, so the band is rendered once with an alpha
+    channel and overlaid by FFmpeg for the span of its cue instead.
+    """
+    from PIL import Image, ImageDraw
+
+    aspect = "9:16" if spec.height > spec.width else "16:9"
+    size = max(18, int(spec.height * CAPTION_HEIGHT_FRAC.get(aspect, 0.030)))
+    font = _load_font(size)
+
+    canvas = Image.new("RGBA", (spec.width, spec.height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+    max_px = int(spec.width * 0.86)
+    lines = _wrap_to_width(draw, text, font, max_px)
+
+    line_h = int(size * 1.34)
+    block_h = line_h * len(lines)
+    pad = int(size * 0.62)
+    margin = int(spec.height * BOTTOM_MARGIN_FRAC.get(aspect, 0.055))
+    top = spec.height - margin - block_h - pad
+
+    widest = max((draw.textlength(ln, font=font) for ln in lines), default=0)
+    band_w = int(widest) + pad * 2
+    left = (spec.width - band_w) // 2
+    # Opaque enough to stay legible over a bright frame, not a black bar.
+    draw.rounded_rectangle(
+        [left, top, left + band_w, top + block_h + pad],
+        radius=int(size * 0.34), fill=(0, 0, 0, 170),
+    )
+    y = top + pad // 2
+    for line in lines:
+        width = draw.textlength(line, font=font)
+        draw.text(((spec.width - width) / 2, y), line,
+                  font=font, fill=(255, 255, 255, 255))
+        y += line_h
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(out)
+    return out

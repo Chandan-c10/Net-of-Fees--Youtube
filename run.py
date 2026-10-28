@@ -28,7 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import profiles
-from pipeline import channels, config, dashboard, gates, logging_setup, notify, trends
+from pipeline import channels, config, dashboard, gates, logging_setup, notify, recovery, trends
 from pipeline.errors import ConfigError, PipelineError
 from pipeline.manifest import PUBLISH_STAGES, STAGES, Episode, Manifest
 from pipeline.recipes import available as available_recipes
@@ -91,10 +91,18 @@ def _run_stage(name: str, ep: Episode, m: Manifest, settings, args) -> None:
     elif name == "captions":
         captions.run(ep, m, method=args.captions)
     elif name == "assemble":
-        assemble.run(ep, m, burn_captions=not args.no_captions,
-                     profile=profile, animate=not args.no_animate,
-                     dissolve=not args.no_dissolve,
-                     music=not args.no_music)
+        # A profile declaring MOTION = "kenburns" carries its frame with a
+        # picture, so it takes the moving-stills path: clips with
+        # overlaid captions rather than stills with captions baked in.
+        if getattr(profile, "MOTION", None) == "kenburns":
+            from pipeline.stages import motion_assemble
+            motion_assemble.run(ep, m, burn_captions=not args.no_captions,
+                                profile=profile, music=not args.no_music)
+        else:
+            assemble.run(ep, m, burn_captions=not args.no_captions,
+                         profile=profile, animate=not args.no_animate,
+                         dissolve=not args.no_dissolve,
+                         music=not args.no_music)
         finish.run(ep, m, look_name=args.look)
     elif name == "metadata":
         metadata.run(ep, m, profile)

@@ -40,7 +40,7 @@ def test_a_profile_may_declare_a_shared_channel(monkeypatch):
     def fake(name):
         mod = real("engineering")
         if name == "engineering":
-            monkeypatch.setattr(mod, "CHANNEL", "main", raising=False)
+            monkeypatch.setattr(mod, "PUBLISH_TO", "main", raising=False)
         return mod
 
     monkeypatch.setattr(profiles, "load", fake)

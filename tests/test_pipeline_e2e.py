@@ -122,3 +122,47 @@ def test_stock_voice_records_it_is_not_a_clone(tmp_path):
     consent = (d / "consent.md").read_text().lower()
     assert "not a clone of any real person" in consent
     assert "impersonation" in consent, "the rule it does not bend must be stated"
+
+
+# ---- the CLI import surface -------------------------------------------
+# Every test above imports pipeline modules directly, so none of them
+# exercise run.py's own imports. Ruff's import reformatting silently
+# dropped a name from them three times, and the suite stayed green while
+# `run.py <id>` raised NameError on the first stage.
+
+
+def test_the_cli_runs_as_a_subprocess():
+    """Catches a broken import in run.py, which importing modules
+    directly cannot."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    proc = subprocess.run(
+        [sys.executable, str(root / "run.py"), "doctor"],
+        capture_output=True, text=True, cwd=str(root), timeout=120,
+        check=False,
+    )
+    assert "NameError" not in proc.stderr, proc.stderr
+    assert "Traceback" not in proc.stderr, proc.stderr
+    assert "Environment" in proc.stdout
+
+
+def test_every_cli_subcommand_parses():
+    """A subcommand whose handler references a missing import fails here
+    rather than in the middle of a render."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    for command in ("new", "list", "status", "doctor", "voices",
+                    "notify-test", "dashboard", "trends", "health"):
+        proc = subprocess.run(
+            [sys.executable, str(root / "run.py"), command, "--help"],
+            capture_output=True, text=True, cwd=str(root), timeout=60,
+            check=False,
+        )
+        assert proc.returncode == 0, f"{command}: {proc.stderr}"
+        assert "Traceback" not in proc.stderr, f"{command}: {proc.stderr}"
