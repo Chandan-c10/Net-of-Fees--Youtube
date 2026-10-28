@@ -1,0 +1,127 @@
+name: publish
+
+# Gate 2, then publishing. Manual only, and the one action here cannot be
+# undone, so it asks you to type the episode id twice.
+
+on:
+  workflow_dispatch:
+    inputs:
+      episode:
+        description: "Episode id"
+        required: true
+      confirm:
+        description: "Type the episode id again to confirm"
+        required: true
+      where:
+        description: "Where to post"
+        required: false
+        default: both
+        type: choice
+        options: [both, youtube, instagram]
+      privacy:
+        description: "YouTube visibility"
+        required: false
+        default: private
+        type: choice
+        options: [private, unlisted, public]
+      dry_run:
+        description: "Show what would be posted and stop"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ID: ${{ inputs.episode }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
+      ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+      IG_USER_ID: ${{ secrets.IG_USER_ID }}
+      IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+
+    steps:
+      - name: Check the confirmation
+        if: inputs.episode != inputs.confirm
+        run: |
+          echo "::error::the confirmation did not match the episode id"
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-publish.txt
+
+      - name: Fetch the rendered episode
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p episodes
+          RUN=$(gh run list --workflow=render.yml --limit 50 \
+                  --json databaseId,status \
+                  --jq '[.[] | select(.status=="completed")] | .[].databaseId' \
+                | while read -r r; do
+                    if gh api "repos/${{ github.repository }}/actions/runs/$r/artifacts" \
+                         --jq '.artifacts[].name' | grep -qx "render-$ID"; then
+                      echo "$r"; break
+                    fi
+                  done)
+          if [ -z "$RUN" ]; then
+            echo "::error::no render artifact named render-$ID. Run the render workflow first."
+            exit 1
+          fi
+          gh run download "$RUN" -n "render-$ID" -D "episodes/$ID"
+          python run.py "$ID" --status
+
+      - name: Restore the YouTube credentials
+        if: inputs.where != 'instagram'
+        env:
+          TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
+        run: |
+          if [ -z "$TOKEN_JSON" ]; then
+            echo "::error::YOUTUBE_TOKEN_JSON is not set. Run tools/youtube_auth.py once locally and paste secrets/youtube_token.json into that repository secret."
+            exit 1
+          fi
+          mkdir -p secrets && chmod 700 secrets
+          printf '%s' "$TOKEN_JSON" > secrets/youtube_token.json
+          chmod 600 secrets/youtube_token.json
+
+      - name: Clear Gate 2
+        run: python run.py "$ID" --approve
+
+      - name: Publish
+        run: |
+          ARGS="--publish"
+          case "${{ inputs.where }}" in
+            youtube)   ARGS="$ARGS --no-instagram" ;;
+            instagram) ARGS="$ARGS --instagram" ;;
+          esac
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          python run.py "$ID" $ARGS
+          python run.py "$ID" --status
+
+      - name: Forget the credentials
+        if: always()
+        run: rm -rf secrets
+
+      - name: Record where it went
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: published-${{ inputs.episode }}
+          retention-days: 30
+          path: episodes/${{ inputs.episode }}/manifest.json

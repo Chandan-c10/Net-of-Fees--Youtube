@@ -305,6 +305,63 @@ Check what is wired up:
 python run.py doctor
 ```
 
+## Running it without a laptop
+
+Three workflows, and your phone. No local machine at any point.
+
+| When | What happens | Who triggers it |
+|---|---|---|
+| 02:00 and 13:00 UTC | `draft` writes the script, scans it for secrets, mails you | a timer |
+| you decide | `render` clears Gate 1, renders the video, mails you a link to watch it | **you** |
+| you decide | `publish` clears Gate 2 and posts it | **you** |
+
+Read the script in the mail, open the GitHub mobile app or the Actions
+tab, run `render` with the episode id. When the video arrives, watch it
+and run `publish`. Both ask for the episode id; `publish` asks twice,
+because it is the one step that cannot be undone.
+
+**Pressing "Run workflow" is the approval.** That is the same decision as
+typing `--approve-script` in a terminal — a deliberate act by you, after
+reading the script. What a timer must never do is make that decision for
+you, so:
+
+* `render` and `publish` are `workflow_dispatch` only. A schedule cannot
+  start them. A test asserts that.
+* `pipeline/gates.py` independently refuses to clear a gate when
+  `GITHUB_EVENT_NAME` is `schedule` or `repository_dispatch` — a workflow
+  file is something someone can edit, so the check also lives where the
+  gate is actually cleared.
+* A test asserts that no step of the scheduled workflow runs an approve
+  command. Planting one makes it fail.
+
+### Cost
+
+Measured on this project: the whole render is one FFmpeg-bound stage at
+62s wall and 291s of CPU, so a 2-core runner takes roughly 2-3 minutes.
+Two episodes a day is around 300 minutes a month against 2000 free on a
+private repo. The draft costs seconds.
+
+Episodes do not persist between runs, since `episodes/` is gitignored, so
+each workflow hands the next one an artifact: 16 KB for the draft, about
+3 MB for the render. Only what review needs is kept, not the scene WAVs,
+which are 33 MB of the 50 MB an episode occupies on disk — artifact
+storage on the free plan is 500 MB.
+
+### Extra secrets for this
+
+| Secret | For |
+|---|---|
+| `YOUTUBE_TOKEN_JSON` | the contents of `secrets/youtube_token.json`, pasted. Run `tools/youtube_auth.py` once on any machine to create it. |
+| `IG_USER_ID`, `IG_ACCESS_TOKEN` | the Reel |
+
+`publish` writes the token to disk, uses it, and deletes it in an
+`always()` step so it does not survive the job.
+
+One thing this cannot do: a voice cloned from your own recording needs
+the reference audio, which is gitignored and too large for a secret.
+Cloud runs use the licensed Kokoro voices. Your own voice means rendering
+on a machine that has your recordings.
+
 ## Alerts
 
 The pipeline mails you when a stage fails, so an unattended run cannot

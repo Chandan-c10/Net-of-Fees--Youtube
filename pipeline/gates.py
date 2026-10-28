@@ -13,12 +13,43 @@ pass a gate without satisfying it.
 from __future__ import annotations
 
 import json
+import os
 
 from .errors import GateError
 from .logging_setup import get
 from .manifest import Episode, Manifest
 
 GATE_2_REQUIRES = ("assemble", "metadata", "thumbnail")
+
+# CI events that are nobody's decision. A workflow can be written to
+# approve only on workflow_dispatch, but a workflow is a file someone can
+# edit; this is the same check in the place that actually clears the gate,
+# for the same reason the upload stage re-checks approved_at rather than
+# trusting a frontend.
+UNATTENDED_EVENTS = ("schedule", "repository_dispatch")
+
+
+def _unattended() -> str | None:
+    """The CI event in progress, when it is one no human triggered."""
+    event = os.getenv("GITHUB_EVENT_NAME", "")
+    return event if event in UNATTENDED_EVENTS else None
+
+
+def assert_a_human_is_asking() -> None:
+    """Refuse to clear a gate on behalf of a timer.
+
+    A human running `--approve-script` in a terminal, in the dashboard, or
+    by pressing "Run workflow" has decided something. A cron firing at
+    02:00 has not, and must not be able to reach this even if a workflow
+    file is edited to try.
+    """
+    event = _unattended()
+    if event:
+        raise GateError(
+            f"refusing to clear a gate during a {event!r} run: a gate is a "
+            "human decision. Trigger the workflow manually instead "
+            "(workflow_dispatch), which records that you asked."
+        )
 
 
 def gate_1_blockers(ep: Episode, m: Manifest) -> list[str]:
@@ -71,6 +102,7 @@ def gate_2_blockers(m: Manifest) -> list[str]:
 
 def approve_gate_1(ep: Episode, m: Manifest) -> None:
     """Clear Gate 1, or raise with the first reason it cannot be cleared."""
+    assert_a_human_is_asking()
     blockers = gate_1_blockers(ep, m)
     if blockers:
         raise GateError("; ".join(blockers))
@@ -81,6 +113,7 @@ def approve_gate_1(ep: Episode, m: Manifest) -> None:
 
 def approve_gate_2(ep: Episode, m: Manifest) -> None:
     """Clear Gate 2, or raise with the first reason it cannot be cleared."""
+    assert_a_human_is_asking()
     blockers = gate_2_blockers(m)
     if blockers:
         raise GateError("; ".join(blockers))
