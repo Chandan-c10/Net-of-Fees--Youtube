@@ -28,7 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import profiles
-from pipeline import channels, config, dashboard, gates, logging_setup, notify
+from pipeline import channels, config, dashboard, gates, logging_setup, notify, trends
 from pipeline.errors import ConfigError, PipelineError
 from pipeline.manifest import PUBLISH_STAGES, STAGES, Episode, Manifest
 from pipeline.recipes import available as available_recipes
@@ -368,6 +368,17 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("notify-test",
                    help="send a test failure alert").set_defaults(func=cmd_notify_test)
 
+    tr = sub.add_parser("trends", help="what the sources are talking about")
+    tr.add_argument("--profile", help="filter to this profile's subject words")
+    tr.add_argument("--all", action="store_true",
+                    help="do not filter by subject")
+    tr.add_argument("--limit", type=int, default=10)
+    tr.add_argument("--min-mentions", type=int, default=2,
+                    dest="min_mentions")
+    tr.add_argument("--json", help="also write the full report here")
+    tr.add_argument("-v", "--verbose", action="store_true")
+    tr.set_defaults(func=cmd_trends)
+
     dash = sub.add_parser("dashboard", help="serve the gate review panel")
     dash.add_argument("--host", default="127.0.0.1",
                       help="127.0.0.1 (default) needs no token; anything "
@@ -393,6 +404,48 @@ def cmd_dashboard(args) -> int:
     if args.token == "":          # --token with no value: generate one
         token = dashboard.new_token()
     dashboard.serve(host=args.host, port=args.port, token=token)
+    return 0
+
+
+def cmd_trends(args) -> int:
+    """What the sources are talking about. Suggests subjects, nothing more."""
+    logging_setup.configure(None, args.verbose)
+    profile = profiles.load(args.profile or config.load().profile)
+    keywords = () if args.all else trends.keywords_for(profile)
+    report = trends.research(trends.default_sources(profile),
+                             keywords=keywords,
+                             min_mentions=args.min_mentions)
+
+    print(f"\n  Read {report['signals_read']} signals, "
+          f"{report['signals_fresh']} inside {report['window_hours']}h")
+    print(f"  Sources: {', '.join(report['sources_used']) or 'none'}")
+    for name, why in report["sources_failed"].items():
+        print(f"    {name}: {why}")
+
+    if report["topics"]:
+        print("\n  Recurring across headlines\n")
+        for topic in report["topics"][:args.limit]:
+            print(f"    {topic['mentions']}x  {topic['term']}"
+                  f"   [{', '.join(topic['sources'])}]")
+            for ev in topic["evidence"][:2]:
+                metric = next((f"{k}={v}" for k, v in ev.items()
+                               if k in ("hn_score", "view_count")), "")
+                print(f"         {ev['title'][:68]}  {metric}")
+
+    if report["standouts"]:
+        print("\n  Standing out in their own batch\n")
+        for topic in report["standouts"][:args.limit]:
+            ev = topic["evidence"][0]
+            metric = next((f"{v}" for k, v in ev.items()
+                           if k in ("hn_score", "view_count")), "")
+            print(f"    {metric:>8}  {topic['term'][:66]}")
+            print(f"              {ev['url'][:70]}")
+
+    if args.json:
+        Path(args.json).write_text(json.dumps(report, indent=2),
+                                   encoding="utf-8")
+        print(f"\n  Written to {args.json}")
+    print(f"\n  {report['method']}\n")
     return 0
 
 
@@ -424,7 +477,7 @@ def main(argv: list[str] | None = None) -> int:
     # `run.py 001 ...` is the common path; route it without a subcommand.
     if argv and not argv[0].startswith("-") and argv[0] not in {
         "new", "list", "status", "doctor", "voices", "notify-test",
-        "dashboard"
+        "dashboard", "trends"
     }:
         rp = argparse.ArgumentParser(prog="run.py <id>")
         rp.add_argument("id")
