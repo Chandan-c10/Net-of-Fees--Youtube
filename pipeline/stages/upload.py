@@ -131,7 +131,7 @@ def _client():
     creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
-        token_path.write_text(creds.to_json())
+        token_path.write_text(creds.to_json(), encoding="utf-8")
     return build("youtube", "v3", credentials=creds, cache_discovery=False)
 
 
@@ -144,7 +144,8 @@ def run(ep: Episode, m: Manifest, dry_run: bool = False,
     if not ep.video.exists():
         raise StageError(f"no video at {ep.video}")
 
-    data = json.loads(ep.snapshot.read_text()) if ep.snapshot.exists() else None
+    data = (json.loads(ep.snapshot.read_text(encoding="utf-8"))
+            if ep.snapshot.exists() else None)
     row = _record_attempt(m, "youtube")
     description = build_description(m, data) + f"\n\nref: {row['idempotency_key']}"
 

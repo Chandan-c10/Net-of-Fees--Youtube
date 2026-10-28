@@ -27,7 +27,8 @@ def run(ep: Episode, m: Manifest, engine_name: str = "silent",
         meta = VOICES_DIR / m.voice / "meta.json"
         if meta.exists():
             import json
-            kwargs["voice"] = json.loads(meta.read_text()).get("voice", "am_michael")
+            kwargs["voice"] = json.loads(
+                meta.read_text(encoding="utf-8")).get("voice", "am_michael")
     engine = get_engine(engine_name, **kwargs)
     ep.audio_dir.mkdir(parents=True, exist_ok=True)
 

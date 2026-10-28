@@ -106,7 +106,10 @@ def scan_text(text: str, origin: str = "<text>") -> list[Finding]:
 
 def scan_file(path: Path) -> list[Finding]:
     try:
-        text = path.read_text(errors="replace")
+        # utf-8 explicitly: on Windows the default is the locale
+        # codepage, and a mis-decoded file is a mis-scanned file --
+        # in the one place that must not miss anything.
+        text = path.read_text(encoding="utf-8", errors="replace")
     except (OSError, UnicodeDecodeError):
         return []  # binary or unreadable: nothing textual to leak
     return scan_text(text, origin=str(path.name))

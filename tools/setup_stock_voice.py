@@ -78,7 +78,7 @@ def main() -> int:
 
     # Reuse an existing lexicon so pronunciation is right immediately.
     seed = ROOT / "voices" / "chandan_en" / "lexicon.json"
-    lex = json.loads(seed.read_text()) if seed.exists() else {}
+    lex = json.loads(seed.read_text(encoding="utf-8")) if seed.exists() else {}
     (d / "lexicon.json").write_text(json.dumps(lex, indent=2), encoding="utf-8")
 
     print(f"Created voices/{name}/")

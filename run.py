@@ -219,7 +219,7 @@ def _approve_gate_1(ep: Episode, m: Manifest, log) -> int:
     if flagged:
         raise GateError(f"scenes still flagged: {flagged}")
 
-    data = json.loads(ep.snapshot.read_text())
+    data = json.loads(ep.snapshot.read_text(encoding="utf-8"))
     from pipeline.script_format import validate_against_snapshot
     validate_against_snapshot(m.scenes, data, profiles.load(m.profile))
 

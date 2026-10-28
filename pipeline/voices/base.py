@@ -80,7 +80,7 @@ def load_lexicon(voice_dir: Path) -> dict[str, str]:
     if not path.exists():
         return {}
     try:
-        raw = json.loads(path.read_text())
+        raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise StageError(f"lexicon at {path} is not valid JSON: {exc}") from exc
     if not isinstance(raw, dict):
@@ -114,7 +114,9 @@ def assert_consented(voice_dir: Path) -> None:
             f"Create it with reference/, meta.json and consent.md"
         )
     consent = voice_dir / "consent.md"
-    if not consent.exists() or not consent.read_text().strip():
+    # A consent file carries a speaker's name, which need not be Latin.
+    if not consent.exists() or not consent.read_text(
+            encoding="utf-8", errors="replace").strip():
         raise StageError(
             f"voice {voice_dir.name!r} has no consent.md. "
             f"Every voice must record who it belongs to and their permission."

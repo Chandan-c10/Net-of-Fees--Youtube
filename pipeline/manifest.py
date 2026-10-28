@@ -104,7 +104,7 @@ class Manifest:
         if not path.exists():
             raise ManifestError(f"no manifest at {path}")
         try:
-            raw = json.loads(path.read_text())
+            raw = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise ManifestError(f"corrupt manifest at {path}: {exc}") from exc
         return cls.from_dict(raw)
@@ -132,7 +132,8 @@ class Manifest:
         self.validate()
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(asdict(self), indent=2, sort_keys=False))
+        tmp.write_text(json.dumps(asdict(self), indent=2, sort_keys=False),
+                       encoding="utf-8")
         tmp.replace(path)  # atomic: a crash mid-write never truncates state
 
     def validate(self) -> None:

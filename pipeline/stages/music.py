@@ -47,7 +47,8 @@ def find_track(project_root: Path, name: str | None = None) -> Path | None:
         return None
 
     licence = music_dir / LICENCE_FILE
-    if not licence.exists() or not licence.read_text().strip():
+    if not licence.exists() or not licence.read_text(
+            encoding="utf-8", errors="replace").strip():
         raise StageError(
             f"{music_dir} has no {LICENCE_FILE}. Every track must record "
             f"where it came from and under what licence. A copyright claim "

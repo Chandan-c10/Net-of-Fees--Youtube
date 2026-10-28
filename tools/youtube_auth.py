@@ -38,7 +38,7 @@ def main() -> int:
     flow = InstalledAppFlow.from_client_secrets_file(str(CLIENT_SECRET), SCOPES)
     creds = flow.run_local_server(port=0)
     TOKEN.parent.mkdir(parents=True, exist_ok=True)
-    TOKEN.write_text(creds.to_json())
+    TOKEN.write_text(creds.to_json(), encoding="utf-8")
     TOKEN.chmod(0o600)  # the refresh token is precious; keep it off other users
     print(f"\nSaved {TOKEN}")
     print("This file is a credential. It is gitignored. Back it up securely.")
