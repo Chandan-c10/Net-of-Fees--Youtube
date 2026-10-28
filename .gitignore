@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+secrets/
+episodes/*/
+!episodes/.gitkeep
+voices/*/reference/*
+!voices/*/reference/.gitkeep
+.pytest_cache/
+.DS_Store

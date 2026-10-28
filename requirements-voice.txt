@@ -1,0 +1,17 @@
+# Voice engines. Install when moving off the draft engine.
+#
+# IMPORTANT: confirm the licence of the exact model checkpoint permits
+# commercial use before publishing. Several high-quality cloning models
+# (XTTS-v2, some F5-TTS and Fish Speech checkpoints) are non-commercial
+# and would be a licence violation on a monetised channel.
+# Architecture doc, section 17, question 2.
+
+torch>=2.2            # MPS on Apple Silicon, CUDA on Windows with NVIDIA
+soundfile>=0.12
+
+# Pick ONE voice engine:
+# chatterbox-tts      # MIT licensed - the starting candidate
+# kokoro>=0.9         # fallback, fixed voices, no cloning
+
+# Caption timing with true word-level timestamps
+faster-whisper>=1.0

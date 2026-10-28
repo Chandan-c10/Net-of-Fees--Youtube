@@ -1,0 +1,6 @@
+# Publishing. Only needed when you are ready to upload.
+google-api-python-client>=2.100
+google-auth-oauthlib>=1.2
+
+# Optional script generation via Gemini's free tier
+# google-generativeai>=0.8

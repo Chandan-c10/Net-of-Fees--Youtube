@@ -1,0 +1,8 @@
+{
+  "name": "chandan_en",
+  "language": "en-IN",
+  "engine": "cloned",
+  "model": "TBD - confirm the checkpoint licence permits commercial use",
+  "reference_dir": "reference/",
+  "notes": "Record 30-60 min, one session, one room, one mic position."
+}

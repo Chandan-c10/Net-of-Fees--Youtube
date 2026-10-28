@@ -1,0 +1,22 @@
+{
+  "F&O": "F and O",
+  "STT": "S T T",
+  "GST": "G S T",
+  "SEBI": "SEBY",
+  "NSE": "N S E",
+  "BSE": "B S E",
+  "P&L": "P and L",
+  "crore": "crore",
+  "lakh": "lakh",
+  "CE": "call",
+  "PE": "put",
+  "OTM": "out of the money",
+  "ITM": "in the money",
+  "ATM": "at the money",
+  "LTP": "last traded price",
+  "MTM": "mark to market",
+  "FII": "F I I",
+  "DII": "D I I",
+  "IV": "implied volatility",
+  "OI": "open interest"
+}

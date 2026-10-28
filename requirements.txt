@@ -1,0 +1,6 @@
+# Core pipeline. Nothing here needs a GPU or an account.
+matplotlib>=3.8
+pillow>=10.0
+
+# Tests
+pytest>=8.0
