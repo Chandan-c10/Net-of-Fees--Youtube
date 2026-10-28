@@ -24,6 +24,8 @@ from . import voice_process
 from .caption_overlay import Cue, build_frames, render_cue_frame
 from .export import load_snapshot
 from .motion import BUILD_SEC, build_in
+from . import music as music_stage
+from . import transitions as transitions_stage
 
 
 def build_concat_list(frames: list[tuple[Path, float]], path: Path) -> Path:
@@ -62,7 +64,8 @@ def scene_frames(ep: Episode, m: Manifest, spec: VideoSpec,
             raise StageError(f"{scene.slug} has no measured duration; run voice first")
 
     if not burn_captions:
-        return [(ep.scene_visual(s), s.duration_sec) for s in m.scenes]
+        plain = [(ep.scene_visual(s), s.duration_sec) for s in m.scenes]
+        return plain, set(range(len(plain)))
 
     raw = captions_stage.read_cues(ep)
     cues = [Cue(c["scene"], c["start"], c["end"], c["text"]) for c in raw]
@@ -84,12 +87,18 @@ def scene_frames(ep: Episode, m: Manifest, spec: VideoSpec,
     frames = build_frames(cues, lambda i: by_scene[i], spec, ep.dir / "frames")
 
     if not animate or profile is None:
-        return frames
+        starts, idx = set(), 0
+        for scene in m.scenes:
+            starts.add(idx)
+            idx += sum(1 for c in cues if c.scene == scene.index)
+        return frames, starts
 
     data = load_snapshot(ep)
     out: list[tuple[Path, float]] = []
+    boundaries: set[int] = set()
     cue_index = 0
     for scene in m.scenes:
+        boundaries.add(len(out))
         scene_cues = [c for c in cues if c.scene == scene.index]
         scene_frames_ = frames[cue_index:cue_index + len(scene_cues)]
         cue_index += len(scene_cues)
@@ -115,7 +124,7 @@ def scene_frames(ep: Episode, m: Manifest, spec: VideoSpec,
             out.append((captioned, per_build))
         out.append((first_path, max(0.05, first_dur - borrowed)))
         out.extend(scene_frames_[1:])
-    return out
+    return out, boundaries
 
 
 # Captions are composited with Pillow in caption_overlay.py rather than
@@ -126,13 +135,25 @@ def scene_frames(ep: Episode, m: Manifest, spec: VideoSpec,
 
 def run(ep: Episode, m: Manifest, spec: VideoSpec = LONGFORM,
         burn_captions: bool = True, master_audio: bool = True,
-        profile=None, animate: bool = True) -> Path:
+        profile=None, animate: bool = True, dissolve: bool = True,
+        music: bool = True) -> Path:
     log = get(m.id, "assemble")
     if not m.scenes:
         raise StageError("no scenes; run the script stage first")
 
     audio = voice_process.run(ep, m, master=master_audio)
-    frames = scene_frames(ep, m, spec, burn_captions, profile, animate)
+
+    if music:
+        from ..config import ROOT
+        audio = music_stage.apply_if_available(
+            ROOT, audio, m.total_duration(), m.id
+        )
+
+    frames, boundaries = scene_frames(ep, m, spec, burn_captions,
+                                      profile, animate)
+    if dissolve:
+        frames = transitions_stage.apply(frames, boundaries,
+                                         ep.dir / "transitions")
     listing = build_concat_list(frames, ep.dir / "concat_video.txt")
 
     args = [
@@ -178,6 +199,7 @@ def run(ep: Episode, m: Manifest, spec: VideoSpec = LONGFORM,
         captions_burned=burn_captions,
         frames=len(frames),
         animated=animate and profile is not None,
+        dissolves=dissolve,
     )
     log.info(f"{actual:.2f}s, drift {drift*1000:.0f}ms, "
              f"{ep.video.stat().st_size/1_048_576:.1f} MB")

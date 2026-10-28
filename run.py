@@ -30,8 +30,9 @@ from pipeline import config, logging_setup
 from pipeline.errors import GateError, PipelineError
 from pipeline.manifest import STAGES, Episode, Manifest
 from pipeline.recipes import available as available_recipes
-from pipeline.stages import (assemble, captions, charts, export, metadata,
-                             script_gen, shorts, thumbnail, upload, voice)
+from pipeline.stages import (assemble, captions, charts, export, finish,
+                             metadata, script_gen, shorts, thumbnail,
+                             upload, voice)
 
 import profiles
 
@@ -69,7 +70,10 @@ def _run_stage(name: str, ep: Episode, m: Manifest, settings, args) -> None:
         captions.run(ep, m, method=args.captions)
     elif name == "assemble":
         assemble.run(ep, m, burn_captions=not args.no_captions,
-                     profile=profile, animate=not args.no_animate)
+                     profile=profile, animate=not args.no_animate,
+                     dissolve=not args.no_dissolve,
+                     music=not args.no_music)
+        finish.run(ep, m, look_name=args.look)
     elif name == "metadata":
         metadata.run(ep, m, profile)
     elif name == "thumbnail":
@@ -349,6 +353,10 @@ def main(argv: list[str] | None = None) -> int:
         rp.add_argument("--through-upload", action="store_true")
         rp.add_argument("--no-captions", action="store_true")
         rp.add_argument("--no-animate", action="store_true")
+        rp.add_argument("--no-dissolve", action="store_true")
+        rp.add_argument("--no-music", action="store_true")
+        rp.add_argument("--look", default="clean",
+                        choices=("clean", "filmic", "none"))
         rp.add_argument("--voice-engine", default=config.load().voice_engine)
         rp.add_argument("--script-engine", default=config.load().script_engine)
         rp.add_argument("--captions", default="derive", choices=("derive", "whisper"))
