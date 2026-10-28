@@ -107,7 +107,7 @@ def test_failure_body_names_the_episode_and_stage(configured, monkeypatch):
                         lambda self, s, b: sent.update(subject=s, body=b))
     notify.failure("042", "assemble", StageError("drift too high"))
     assert "042" in sent["subject"] and "assemble" in sent["subject"]
-    assert "nothing was published" in sent["body"]
+    assert "Nothing was published" in sent["body"]
 
 
 def test_test_channel_reports_missing_config(monkeypatch):

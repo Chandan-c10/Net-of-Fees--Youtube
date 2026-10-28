@@ -1,6 +1,7 @@
 # Publishing. Only needed when you are ready to upload.
-google-api-python-client>=2.100
-google-auth-oauthlib>=1.2
+# Upper bounds for the reason given in requirements.txt.
+google-api-python-client>=2.100,<3
+google-auth-oauthlib>=1.2,<2
 
 # Optional script generation via Gemini's free tier
-# google-generativeai>=0.8
+# google-generativeai>=0.8,<1

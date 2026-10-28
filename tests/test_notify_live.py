@@ -120,7 +120,7 @@ def test_a_real_failure_alert_names_the_episode(relay):
     assert "realtest" in relay.message
     assert "assemble" in relay.message
     assert "drift was 120ms" in relay.message
-    assert "nothing was published" in relay.message
+    assert "Nothing was published" in relay.message
 
 
 def test_a_real_credential_is_not_in_the_bytes_that_were_sent(relay):

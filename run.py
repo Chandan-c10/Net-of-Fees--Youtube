@@ -129,15 +129,28 @@ def _execute(ep: Episode, m: Manifest, name: str, settings, args, log) -> bool:
         return True
 
     try:
-        _run_stage(name, ep, m, settings, args)
+        # Network stages get retried on a transient failure; the render
+        # stages are deterministic, so a retry would fail identically and
+        # only cost a minute. recovery.classify decides what counts as
+        # transient, and a gate failure never does.
+        if recovery.worth_retrying(name) and not getattr(args, "no_retry", False):
+            recovery.with_retry(
+                lambda: _run_stage(name, ep, m, settings, args),
+                what=f"{m.id}:{name}", episode_id=m.id)
+        else:
+            _run_stage(name, ep, m, settings, args)
     except PipelineError as exc:
         m.mark_failed(name, str(exc))
         ep.save_manifest(m)
+        exc.log_path = str(ep.log)
         # Carry the location on the exception rather than mailing from here,
         # so there is exactly one place that sends an alert.
         exc.episode_id, exc.stage = m.id, name
         raise
     ep.save_manifest(m)
+    # Success is what closes an open incident; nothing clears on a timer,
+    # because a problem nobody fixed has not gone away.
+    notify.recovered(m.id, name)
     return True
 
 
@@ -368,6 +381,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("notify-test",
                    help="send a test failure alert").set_defaults(func=cmd_notify_test)
 
+    he = sub.add_parser("health", help="what has been breaking")
+    he.add_argument("--hours", type=int, default=24)
+    he.add_argument("--mail", action="store_true",
+                    help="mail the open list, if anything is open")
+    he.set_defaults(func=cmd_health)
+
     tr = sub.add_parser("trends", help="what the sources are talking about")
     tr.add_argument("--profile", help="filter to this profile's subject words")
     tr.add_argument("--all", action="store_true",
@@ -449,6 +468,29 @@ def cmd_trends(args) -> int:
     return 0
 
 
+def cmd_health(args) -> int:
+    """What has been breaking, and what is still open."""
+    from pipeline import health
+    ledger = health.Ledger.load()
+    stats = ledger.summary(args.hours)
+    print(f"\n  Last {stats['window_hours']}h: {stats['runs']} stage runs, "
+          f"{stats['failures']} failed\n")
+    open_now = ledger.open_incidents()
+    if not open_now:
+        print("    nothing open\n")
+    for incident in open_now:
+        print("   ", incident.describe().replace("\n", "\n    "))
+        fix = notify.remedy_for(incident.error_class, incident.message)
+        if fix:
+            print(f"      fix: {fix}")
+        print()
+    if args.mail:
+        notify.open_issues(args.hours)
+        print("  mailed the open list\n" if open_now
+              else "  nothing open, so nothing mailed\n")
+    return 1 if open_now else 0
+
+
 def cmd_notify_test(args) -> int:
     ok, detail = notify.test_channel()
     print(f"\n  alerts: {'ok' if ok else 'not working'}  —  {detail}\n")
@@ -466,8 +508,15 @@ def _fail(exc: BaseException) -> int:
     pass through, and because a failure that never reached the user is the
     one thing an unattended pipeline cannot afford.
     """
-    notify.failure(getattr(exc, "episode_id", None), getattr(exc, "stage", None), exc)
-    print(f"\n  {type(exc).__name__}: {exc}\n", file=sys.stderr)
+    notify.failure(getattr(exc, "episode_id", None),
+                   getattr(exc, "stage", None), exc,
+                   getattr(exc, "log_path", None))
+    print(f"\n  {type(exc).__name__}: {exc}", file=sys.stderr)
+    print(f"  {recovery.describe(exc)}", file=sys.stderr)
+    fix = notify.remedy(exc)
+    if fix:
+        print(f"  fix: {fix}", file=sys.stderr)
+    print(file=sys.stderr)
     return getattr(exc, "exit_code", 1)
 
 
@@ -477,7 +526,7 @@ def main(argv: list[str] | None = None) -> int:
     # `run.py 001 ...` is the common path; route it without a subcommand.
     if argv and not argv[0].startswith("-") and argv[0] not in {
         "new", "list", "status", "doctor", "voices", "notify-test",
-        "dashboard", "trends"
+        "dashboard", "trends", "health"
     }:
         rp = argparse.ArgumentParser(prog="run.py <id>")
         rp.add_argument("id")
@@ -487,6 +536,8 @@ def main(argv: list[str] | None = None) -> int:
         rp.add_argument("--approve-script", action="store_true")
         rp.add_argument("--approve", action="store_true")
         rp.add_argument("--publish", action="store_true")
+        rp.add_argument("--no-retry", action="store_true",
+                        help="fail on the first network error")
         rp.add_argument("--instagram", action="store_true",
                         help="with --publish, post the reel only")
         rp.add_argument("--no-instagram", action="store_true",

@@ -1,7 +1,14 @@
 # Core pipeline. Nothing here needs a GPU or an account.
-matplotlib>=3.8
-pillow>=10.0
+#
+# Upper bounds are deliberate. Open-ended pins mean a major release of
+# any of these changes the render without a line of this project
+# changing, and the first you hear of it is a broken episode. Pillow's
+# getdata() deprecation already caught this project once. Patches and
+# minors still come through; a major needs a person to look.
+matplotlib>=3.8,<4
+pillow>=10.0,<13
 
 # Tests and lint
-pytest>=8.0
-ruff>=0.6
+pytest>=8.0,<9
+ruff>=0.6,<1
+pyyaml>=6.0,<7          # workflow files are asserted on in tests

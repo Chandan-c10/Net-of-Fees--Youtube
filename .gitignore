@@ -18,3 +18,4 @@ data/incidents.json
 # Generated from tools/make_voice_script.py, and it pulls from your current
 # episode scripts -- so it goes stale. Regenerate rather than commit it.
 voices/*/RECORDING.md
+state/

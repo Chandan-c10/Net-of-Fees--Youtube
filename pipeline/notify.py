@@ -20,7 +20,7 @@ import os
 import smtplib
 from email.message import EmailMessage
 
-from . import scrub
+from . import health, scrub
 from .logging_setup import get
 
 TIMEOUT_SEC = 20
@@ -102,35 +102,157 @@ def test_channel() -> tuple[bool, str]:
     return True, f"sent to {ch.to}"
 
 
-def failure(episode_id: str | None, stage: str | None, exc: BaseException) -> None:
-    """Report a broken run. Swallows its own errors by design.
+# Known failures and what to do about them. A mail that says what broke
+# and not what to do about it makes the reader go and look it up, which is
+# the work the mail was supposed to save.
+REMEDIES: tuple[tuple[str, str], ...] = (
+    ("youtube_token_file", "Run: python tools/youtube_auth.py"),
+    ("no youtube credentials",
+     "Run: python tools/youtube_auth.py  (add --channel NAME for a second "
+     "channel)"),
+    ("ig_user_id", "Set IG_USER_ID and IG_ACCESS_TOKEN. See README, "
+                   "'Instagram setup'."),
+    ("ig_access_token", "Set IG_USER_ID and IG_ACCESS_TOKEN. See README, "
+                        "'Instagram setup'."),
+    ("voice engine needs", "pip install -r requirements-voice.txt"),
+    ("draft voice engine",
+     "Re-narrate with a real voice:  run.py <id> --stage voice --force "
+     "--voice-engine kokoro"),
+    ("quota", "The daily API quota is spent. Retry tomorrow; this does not "
+              "consume a retry."),
+    ("drift", "Re-run the render:  run.py <id> --stage assemble --force. If "
+              "it persists, a scene's measured duration is wrong -- re-run "
+              "the voice stage first."),
+    ("9:16", "Render the vertical cut from a _shorts profile; Reels must be "
+             "1080x1920."),
+    ("no vertical cut", "Run the shorts stage:  run.py <id> --stage shorts"),
+    ("run the shorts stage", "run.py <id> --stage shorts"),
+    ("run the metadata stage", "run.py <id> --stage metadata"),
+    ("run voice first", "run.py <id> --stage voice"),
+    ("fewer than", "Add more rows to data/incidents.json. The recipe will "
+                   "not invent one."),
+    ("ffmpeg", "Install FFmpeg, then check it with:  run.py doctor"),
+    ("scrub", "A secret was found in the episode data. Remove it from the "
+              "source file and re-run the scrub stage."),
+    ("no profile", "Check the profile name:  run.py doctor  lists them."),
+    ("smtp", "Check the SMTP settings with:  run.py notify-test"),
+)
 
-    Called from the top-level handler, where the process is already on its
-    way to a non-zero exit. Raising here would replace a useful traceback
-    with an SMTP one, so this never raises.
+
+def remedy_for(error_class: str, message: str) -> str | None:
+    """A concrete next step, matched on the text of a failure.
+
+    Takes strings rather than an exception so a stored incident can be
+    looked up too, without fabricating an exception class to hold it.
+    """
+    haystack = f"{error_class} {message}".lower()
+    for needle, fix in REMEDIES:
+        if needle in haystack:
+            return fix
+    return None
+
+
+def remedy(exc: BaseException) -> str | None:
+    return remedy_for(type(exc).__name__, str(exc))
+
+
+def _try_send(ch: Channel, subject: str, body: str, log) -> None:
+    """Send, or warn. Never raises: a broken alert must not replace the
+    error it was reporting."""
+    try:
+        ch.send(subject, body)
+        log.info("alert sent", extra={"to": ch.to})
+    except Exception as mail_exc:
+        log.warning("could not send alert: %s: %s",
+                    type(mail_exc).__name__, mail_exc)
+
+
+def failure(episode_id: str | None, stage: str | None, exc: BaseException,
+            log_path: str | None = None) -> None:
+    """Record a broken run, and mail about it once.
+
+    The ledger decides whether to mail: a first sighting does, repeats are
+    counted silently, and a problem still open after a day reminds.
+    Without that, a stage failing on a timer twice a day would send sixty
+    identical mails a month and the inbox would stop being read.
+
+    Swallows its own errors by design -- the process is already heading
+    for a non-zero exit, and raising here would replace a useful traceback
+    with an SMTP one.
     """
     log = get(episode_id, stage)
+    try:
+        incident, notify_now = health.failed(
+            episode_id, stage or "pipeline", exc, log_path)
+    except Exception as ledger_exc:
+        log.warning("could not record the failure: %s", ledger_exc)
+        incident, notify_now = None, True
+
     ch = Channel()
     if not ch.configured:
         log.debug("alerts not configured; skipping mail")
+        return
+    if not notify_now:
+        log.info("already reported; not mailing again")
         return
 
     where = f"episode {episode_id}" if episode_id else "pipeline"
     if stage:
         where += f", stage {stage}"
-    subject = f"[net-of-fees] {type(exc).__name__} in {where}"
-    body = (
-        f"{where} failed.\n\n"
-        f"{type(exc).__name__}: {exc}\n\n"
-        "The run stopped at this point; nothing was published. Check the\n"
-        "episode log for the full traceback, then re-run the stage once\n"
-        "the cause is fixed."
+    detail = (incident.describe() if incident
+              else f"{type(exc).__name__} in {where}\n  {exc}")
+    fix = remedy(exc)
+    parts = ["The system broke. Nothing was published.", "", detail, ""]
+    if fix:
+        parts += ["What to do:", f"  {fix}", ""]
+    parts.append(
+        "This stays on the open list until that stage runs successfully.\n"
+        "Once it does, you get a note saying it recovered."
     )
+    _try_send(ch, f"[net-of-fees] broken: {type(exc).__name__} in {where}",
+              "\n".join(parts), log)
+
+
+def recovered(episode_id: str | None, stage: str) -> None:
+    """Close anything open for this stage, and say so if something closed.
+
+    Knowing a thing is fixed is the other half of knowing it broke, and
+    silence is indistinguishable from the alerting itself being broken.
+    """
+    log = get(episode_id, stage)
     try:
-        ch.send(subject, body)
-        log.info("failure alert sent", extra={"to": ch.to})
-    except Exception as mail_exc:
-        log.warning(
-            "could not send failure alert: %s: %s",
-            type(mail_exc).__name__, mail_exc,
-        )
+        closed = health.succeeded(episode_id, stage)
+    except Exception as ledger_exc:
+        log.debug("could not update the ledger: %s", ledger_exc)
+        return
+    if not closed:
+        return
+    ch = Channel()
+    if not ch.configured:
+        return
+    _try_send(
+        ch, f"[net-of-fees] recovered: {stage}",
+        f"{stage} ran successfully, so this is now closed:\n\n"
+        + "\n\n".join(i.describe() for i in closed)
+        + "\n\nNothing further to do.",
+        log,
+    )
+
+
+def open_issues(hours: int = 24) -> None:
+    """Mail the open list, and only if something is on it.
+
+    Deliberately not a daily all-clear: mail arrives when there is a
+    problem, so an empty inbox means nothing is wrong.
+    """
+    log = get(None, "health")
+    ledger = health.Ledger.load()
+    if ledger.healthy():
+        log.info("nothing open; not mailing")
+        return
+    ch = Channel()
+    if not ch.configured:
+        return
+    count = len(ledger.open_incidents())
+    _try_send(ch, f"[net-of-fees] {count} still broken",
+              ledger.digest(hours), log)

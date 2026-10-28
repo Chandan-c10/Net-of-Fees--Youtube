@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # Weekly, because the likeliest future break is not a change here but a
+  # release of something this depends on. Without a schedule, upstream
+  # breakage is discovered during a render rather than in CI.
+  schedule:
+    - cron: "0 6 * * 1"
 
 jobs:
   test:
@@ -17,6 +22,14 @@ jobs:
         # pipeline/platform_support.py.
         os: [ubuntu-latest, windows-latest]
         python: ["3.11", "3.12"]
+        include:
+          # A warning leg, not a gate: it reports breakage on the next
+          # Python before that version is the one being used. 3.15 makes
+          # UTF-8 the default, which this project already handles
+          # explicitly.
+          - os: ubuntu-latest
+            python: "3.13"
+            experimental: true
 
     steps:
       - uses: actions/checkout@v4
@@ -49,4 +62,5 @@ jobs:
         run: python -m ruff check .
 
       - name: Test
+        continue-on-error: ${{ matrix.experimental || false }}
         run: python -m pytest -q -ra

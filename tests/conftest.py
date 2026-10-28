@@ -90,3 +90,16 @@ def rendered_reel(tmp_path_factory) -> Path:
     )
     assert proc.returncode == 0, proc.stderr
     return path
+
+
+@pytest.fixture(autouse=True)
+def isolated_health_ledger(tmp_path, monkeypatch):
+    """Point the failure ledger at a temporary file for every test.
+
+    Autouse and unconditional. The ledger is global, persistent state, so
+    without this a test that records a failure changes whether a later
+    test is mailed about one -- and the suite would write to the real
+    state/health.json, which is the operator's record of what is broken.
+    """
+    from pipeline import health
+    monkeypatch.setattr(health, "LEDGER", tmp_path / "health.json")
