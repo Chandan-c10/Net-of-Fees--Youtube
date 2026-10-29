@@ -170,6 +170,9 @@ def run(ep: Episode, m: Manifest, spec: VideoSpec = LONGFORM,
         "-c:v", "libx264", "-preset", spec.preset, "-crf", str(spec.crf),
         "-pix_fmt", "yuv420p", "-r", str(spec.fps),
         "-c:a", "aac", "-b:a", spec.audio_bitrate,
+        # Upmixed from the mono voice: some phones route a mono
+        # track to one speaker, which a listener hears as a fault.
+        "-ac", "2",
         "-movflags", "+faststart",
         "-shortest",   # without this the video runs past the audio
         str(ep.video),

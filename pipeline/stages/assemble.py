@@ -169,6 +169,7 @@ def run(ep: Episode, m: Manifest, spec: VideoSpec = LONGFORM,
         "-c:v", "libx264", "-preset", spec.preset, "-crf", str(spec.crf),
         "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", spec.audio_bitrate,
+        "-ac", "2",   # mono routes to one speaker on some phones
         "-movflags", "+faststart",
         "-shortest",  # without this the video runs past the audio
         str(ep.video),

@@ -11,7 +11,7 @@ audio contract in section 5a is untouched and the drift check still holds.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ..config import VideoSpec
@@ -49,6 +49,30 @@ LOOKS = {
     "none": Look("none", contrast=1.0, saturation=1.0, gamma=1.0,
                  vignette_strength=0.0, grain=0.0, drift_pct=0.0),
 }
+
+
+def frame_size(path: Path) -> tuple[int, int]:
+    """The dimensions of the video being finished.
+
+    Read from the file rather than taken from a spec. A finishing pass is
+    a grade, not a reframe, so it must preserve whatever geometry it is
+    handed -- and defaulting to LONGFORM turned every vertical episode
+    into a squashed landscape one, because run.py calls this without a
+    spec.
+    """
+    import subprocess
+
+    from ..platform_support import ffprobe
+    proc = subprocess.run(
+        [ffprobe(), "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=width,height", "-of", "csv=p=0",
+         str(path)],
+        capture_output=True, text=True, timeout=60, check=False,
+    )
+    if proc.returncode != 0 or "," not in proc.stdout:
+        raise StageError(f"could not read the size of {path.name}")
+    width, height = (int(v) for v in proc.stdout.strip().split(",")[:2])
+    return width, height
 
 
 def build_filter(look: Look, spec: VideoSpec, duration: float) -> str:
@@ -114,6 +138,10 @@ def run(ep: Episode, m: Manifest, look_name: str = "clean",
         raise StageError(f"no video at {ep.video}; run assemble first")
 
     before = measure_media(ep.video)
+    # Whatever the caller passed, the grade runs at the video's own size.
+    width, height = frame_size(ep.video)
+    spec = replace(spec, width=width, height=height)
+
     raw = ep.out_dir / "video.raw.mp4"
     ep.video.replace(raw)
 
@@ -126,6 +154,18 @@ def run(ep: Episode, m: Manifest, look_name: str = "clean",
         "-movflags", "+faststart",
         str(ep.video),
     ])
+
+    # Geometry is checked as well as duration: a finishing pass that
+    # silently reframed the episode is how a vertical Short became
+    # 1920x1080.
+    if frame_size(ep.video) != (width, height):
+        got = frame_size(ep.video)
+        ep.video.unlink(missing_ok=True)
+        raw.replace(ep.video)
+        raise StageError(
+            f"the finishing pass changed the frame from {width}x{height} "
+            f"to {got[0]}x{got[1]}. A grade must not reframe."
+        )
 
     after = measure_media(ep.video)
     if abs(after - before) > 0.05:

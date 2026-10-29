@@ -8,6 +8,7 @@ from conftest import needs_ffmpeg
 
 from pipeline.config import LONGFORM
 from pipeline.errors import StageError
+from pipeline.platform_support import ffmpeg
 
 # ---- pacing -----------------------------------------------------------
 
@@ -187,3 +188,48 @@ def test_default_look_has_no_grain():
     from pipeline.stages.finish import LOOKS
     assert LOOKS["clean"].grain == 0.0
     assert LOOKS["none"].vignette_strength == 0.0
+
+
+# ---- the finishing pass must not reframe ------------------------------
+# finish.run defaulted its spec to LONGFORM, and run.py calls it without
+# one, so every vertical episode came out of the grade as a squashed
+# 1920x1080. A grade is not a reframe.
+
+
+@needs_ffmpeg
+@pytest.mark.parametrize("size", [(1080, 1920), (1920, 1080), (1440, 1440)])
+def test_the_finishing_pass_preserves_the_frame(tmp_path, size, manifest):
+    import subprocess
+
+    from pipeline.manifest import Episode
+    from pipeline.stages import finish
+
+    width, height = size
+    ep = Episode("fin", tmp_path)
+    ep.ensure_dirs()
+    ep.video.parent.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.run(
+        [ffmpeg(), "-y", "-v", "error",
+         "-f", "lavfi", "-i", f"testsrc=size={width}x{height}:rate=30",
+         "-f", "lavfi", "-i", "sine=frequency=440",
+         "-t", "2", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+         "-c:a", "aac", str(ep.video)],
+        capture_output=True, text=True, timeout=120, check=False)
+    assert proc.returncode == 0, proc.stderr
+
+    assert finish.frame_size(ep.video) == (width, height)
+    finish.run(ep, manifest, look_name="clean")
+    assert finish.frame_size(ep.video) == (width, height), (
+        "the grade reframed the episode"
+    )
+
+
+@needs_ffmpeg
+def test_the_assembled_video_carries_stereo_audio(tmp_path):
+    """Mono survived to the published file. Platforms accept it, but some
+    phones route a mono track to one speaker, which sounds like a fault."""
+    from pathlib import Path
+    for stage in (Path("pipeline/stages/assemble.py"),
+                  Path("pipeline/stages/motion_assemble.py")):
+        if stage.exists():
+            assert '"-ac", "2"' in stage.read_text(), f"{stage} does not upmix"
