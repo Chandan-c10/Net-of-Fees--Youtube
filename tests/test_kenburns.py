@@ -249,3 +249,75 @@ def test_the_motion_assembler_plans_moves_across_the_episode():
     assert "plan_moves" in source, "the assembler must use plan_moves"
     assert "choose_move" not in source, \
         "picking per scene has nothing to avoid"
+
+
+# ---- geometry ---------------------------------------------------------
+# zoompan scales its crop region to `s`, so feeding it a square and
+# asking for 1080x1920 stretched the picture instead of framing it. A
+# circle came out at ratio 0.562, which is exactly 9/16. Looking at a
+# rendered photo did not catch it; a circle does.
+
+
+@needs_ffmpeg
+@pytest.mark.parametrize("spec", [LONGFORM, SHORTS])
+def test_a_square_source_is_not_stretched(tmp_path, spec):
+    from PIL import Image, ImageDraw
+
+    # Small, and placed where the head-biased crop keeps it. A circle
+    # large enough to be clipped would be measured as an arc, which is
+    # wider than tall, and the test would fail for the wrong reason.
+    src = tmp_path / "circle.png"
+    im = Image.new("RGB", (1000, 1000), (20, 20, 30))
+    ImageDraw.Draw(im).ellipse([350, 330, 650, 630], outline=(255, 80, 80),
+                               width=12)
+    im.save(src)
+
+    out = tmp_path / "out.mp4"
+    kenburns.render(src, out, 2.0, spec, move=kenburns.MOVES[0])
+
+    frame = tmp_path / "frame.png"
+    subprocess.run(
+        [platform_support.ffmpeg(), "-v", "error", "-ss", "0.1",
+         "-i", str(out), "-frames:v", "1", "-y", str(frame)],
+        capture_output=True, timeout=60, check=False)
+
+    import numpy as np
+    arr = np.array(Image.open(frame).convert("L"))
+    ys, xs = np.where(arr > 60)
+    ratio = (xs.max() - xs.min()) / (ys.max() - ys.min())
+    assert abs(ratio - 1.0) < 0.05, (
+        f"a circle rendered at ratio {ratio:.3f}; the picture is being "
+        f"stretched to fill {spec.width}x{spec.height}"
+    )
+
+
+@needs_ffmpeg
+def test_a_wide_source_is_not_stretched_into_a_vertical_frame(tmp_path):
+    from PIL import Image, ImageDraw
+
+    src = tmp_path / "wide.png"
+    im = Image.new("RGB", (1600, 900), (20, 20, 30))
+    ImageDraw.Draw(im).ellipse([700, 300, 900, 500], outline=(255, 80, 80),
+                               width=10)
+    im.save(src)
+    out = tmp_path / "out.mp4"
+    kenburns.render(src, out, 2.0, SHORTS, move=kenburns.MOVES[0])
+
+    frame = tmp_path / "f.png"
+    subprocess.run(
+        [platform_support.ffmpeg(), "-v", "error", "-ss", "0.1",
+         "-i", str(out), "-frames:v", "1", "-y", str(frame)],
+        capture_output=True, timeout=60, check=False)
+    import numpy as np
+    arr = np.array(Image.open(frame).convert("L"))
+    ys, xs = np.where(arr > 60)
+    ratio = (xs.max() - xs.min()) / (ys.max() - ys.min())
+    assert abs(ratio - 1.0) < 0.08, f"circle came out at {ratio:.3f}"
+
+
+def test_the_crop_keeps_heads_rather_than_centring():
+    """Faces sit above the middle of nearly every frame, so a centred
+    crop takes the chin and leaves the hair."""
+    chain = kenburns.filter_chain(kenburns.MOVES[0], 60, SHORTS)
+    assert f"*{kenburns.VERTICAL_CROP_BIAS}" in chain
+    assert kenburns.VERTICAL_CROP_BIAS < 0.5

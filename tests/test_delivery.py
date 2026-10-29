@@ -236,3 +236,31 @@ def test_describe_reports_the_spread():
     assert got["beats"] > 3
     assert got["speed_min"] < got["speed_max"]
     assert got["pause_total_sec"] > 0
+
+
+# ---- pace -------------------------------------------------------------
+# Measured on a real render: a 15-word scene ran 8.97s with 1.63s of
+# silence, and narration came out at 92 words per minute against 150-160
+# for ordinary speech.
+
+
+def test_pauses_are_short_enough_not_to_stall_a_short():
+    """A pause that lets a point land is worth it; one that makes the
+    viewer leave is not."""
+    beats = delivery.plan(PARAGRAPH, 1, "002")
+    silence = sum(b.pause_sec for b in beats)
+    speech_beats = len(beats)
+    assert silence / speech_beats < 0.3, (
+        f"{silence:.2f}s of pause across {speech_beats} beats"
+    )
+
+
+def test_a_full_stop_pause_stays_under_a_quarter_second():
+    assert delivery.PAUSE_BY_ENDING["."] <= 0.25
+
+
+def test_the_scene_tail_is_not_longer_than_a_beat_pause_by_much():
+    from pipeline import pacing
+    assert pacing.TAIL_BY_ENDING["."] <= 0.4, (
+        "a 1.3s tail between scenes is dead air in a 20-second Short"
+    )

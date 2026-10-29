@@ -14,6 +14,7 @@ and a public figure's voice is impersonation under YouTube policy.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from ..errors import ConfigError, StageError
@@ -44,6 +45,7 @@ KNOWN_VOICES: dict[str, str] = {
     "hm_psi":      "Hindi male, alternative",
 }
 
+DEFAULT_SPEED = 1.4
 DEFAULT_VOICE = "am_michael"
 SAMPLE_RATE = 24000  # Kokoro's native rate
 
@@ -87,14 +89,19 @@ class KokoroVoice:
     draft = False
 
     def __init__(self, voice: str = DEFAULT_VOICE, lang_code: str | None = None,
-                 speed: float = 1.0, episode_id: str = "", **_: object):
+                 speed: float | None = None, episode_id: str = "",
+                 **_: object):
         if voice not in KNOWN_VOICES:
             raise ConfigError(
                 f"unknown Kokoro voice {voice!r}.\n"
                 f"  List them with:  python run.py voices"
             )
         self.voice = voice
-        self.speed = speed
+        # Kokoro at 1.0 reads at about 123 words a minute, against
+        # 150-160 for ordinary speech. Measured on a real render, not
+        # assumed. VOICE_SPEED overrides it.
+        self.speed = speed if speed is not None else float(
+            os.getenv("VOICE_SPEED", DEFAULT_SPEED))
         # The first letter of the voice name selects the language pack.
         self.lang_code = lang_code or voice[0]
         self.episode_id = episode_id

@@ -16,23 +16,28 @@ import hashlib
 
 # Pause after a scene, by how it ends. A statement of fact needs room to
 # land; a clause that runs on does not.
+# Halved from the original values. Measured on a real render: a 15-word
+# scene ran 8.97s, of which 1.63s was silence -- 18% dead air, and the
+# narration came out at 92 words per minute against 150-160 for ordinary
+# speech. A pause that lets a point land is worth it; one that makes the
+# viewer leave is not.
 TAIL_BY_ENDING = {
-    ".": 0.62,
-    "?": 0.70,
-    "!": 0.66,
-    ":": 0.38,
-    ",": 0.22,
-    "": 0.45,
+    ".": 0.32,
+    "?": 0.38,
+    "!": 0.34,
+    ":": 0.22,
+    ",": 0.14,
+    "": 0.26,
 }
 
 # A scene carrying a number is given slightly longer, because the viewer
 # is reading the chart as well as listening.
-NUMBER_BONUS = 0.18
+NUMBER_BONUS = 0.12
 # Deterministic jitter so no two scenes land on exactly the same pause.
 JITTER = 0.10
 # Within a scene, a sentence break gets a short breath.
-SENTENCE_PAUSE = 0.34
-COMMA_PAUSE = 0.14
+SENTENCE_PAUSE = 0.22
+COMMA_PAUSE = 0.10
 
 
 def _jitter(seed: str) -> float:

@@ -54,6 +54,12 @@ DURATION_TOLERANCE_SEC = 0.04
 # Shortest clip worth moving across. Below this the move is a twitch.
 MIN_MOVE_SEC = 1.2
 
+# Where to take the crop from when the source is taller than the target.
+# Centre is the obvious choice and the wrong one: faces sit above the
+# middle of almost every frame, so a centred crop takes the chin and
+# leaves the hair. 0.35 keeps heads.
+VERTICAL_CROP_BIAS = 0.35
+
 
 @dataclass(frozen=True)
 class Move:
@@ -183,8 +189,17 @@ def filter_chain(move: Move, frames: int, spec: VideoSpec) -> str:
     y = centre_y if not move.pan_y else \
         f"{centre_y}+({move.pan_y})*(ih-ih/zoom)/2*{eased}"
 
+    # Crop to the output's aspect BEFORE zoompan. zoompan scales its crop
+    # region to `s`, so feeding it a square and asking for 1080x1920
+    # stretches the picture instead of framing it -- a circle came out at
+    # ratio 0.562, which is exactly 9/16. Cover the target first, then
+    # crop to it, then move within that.
+    canvas_w = target
+    canvas_h = int(round(target * spec.height / spec.width))
     chain = (
-        f"scale={target}:-2:flags=lanczos,"
+        f"scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=increase"
+        f":flags=lanczos,"
+        f"crop={canvas_w}:{canvas_h}:(iw-ow)/2:(ih-oh)*{VERTICAL_CROP_BIAS},"
         f"format=yuv420p,"
         f"zoompan=z='{zoom}':x='{x}':y='{y}'"
         f":d={frames}:s={spec.width}x{spec.height}"

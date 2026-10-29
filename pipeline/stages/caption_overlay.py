@@ -21,9 +21,21 @@ from ..platform_support import bold_font
 
 # Safe margins. YouTube overlays its own UI across the lower band of a
 # Short, so captions sit well above the bottom edge there.
-BOTTOM_MARGIN_FRAC = {"16:9": 0.055, "9:16": 0.20}
+# How far the band sits above the bottom edge. The vertical value clears
+# the Shorts UI (progress bar, handle, actions), which occupies roughly
+# the lowest eighth. It was 0.20, which together with an over-large band
+# put captions across 39% of the frame.
+BOTTOM_MARGIN_FRAC = {"16:9": 0.05, "9:16": 0.075}
 SIDE_MARGIN_FRAC = 0.07
-CAPTION_HEIGHT_FRAC = {"16:9": 0.052, "9:16": 0.042}
+# Font size as a fraction of frame height. The vertical value was 0.042,
+# which is 80px on a 1920 frame and wrapped an ordinary sentence onto
+# three lines; the band then covered a fifth of the picture by itself.
+CAPTION_HEIGHT_FRAC = {"16:9": 0.038, "9:16": 0.022}
+
+# A caption longer than this is a cue that should have been split. Two
+# lines is the most that can sit over a picture without becoming the
+# picture.
+MAX_CAPTION_LINES = 2
 OUTLINE_PX = {"16:9": 3, "9:16": 4}
 
 TEXT_FILL = (255, 255, 255, 255)
@@ -146,12 +158,23 @@ def render_caption_strip(text: str, spec: VideoSpec, out: Path) -> Path:
 
     canvas = Image.new("RGBA", (spec.width, spec.height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
-    max_px = int(spec.width * 0.86)
+    # Wrap wider than before so an ordinary sentence fits on two lines
+    # rather than three.
+    max_px = int(spec.width * 0.90)
     lines = _wrap_to_width(draw, text, font, max_px)
+    if len(lines) > MAX_CAPTION_LINES:
+        # Keep the band to two lines; the last one absorbs the remainder
+        # and is ellipsised, which is better than a band that grows to
+        # cover the frame.
+        kept = lines[: MAX_CAPTION_LINES - 1]
+        rest = " ".join(lines[MAX_CAPTION_LINES - 1:])
+        while rest and draw.textlength(rest + "\u2026", font=font) > max_px:
+            rest = rest.rsplit(" ", 1)[0]
+        lines = kept + [rest + "\u2026"]
 
     line_h = int(size * 1.34)
     block_h = line_h * len(lines)
-    pad = int(size * 0.62)
+    pad = int(size * 0.5)
     margin = int(spec.height * BOTTOM_MARGIN_FRAC.get(aspect, 0.055))
     top = spec.height - margin - block_h - pad
 

@@ -51,13 +51,13 @@ SPEED_FLOOR, SPEED_CEIL = 0.90, 1.08
 # Pause after a beat, by what ended it. Longer than the gaps inside a
 # sentence, shorter than the gap between scenes, which pacing.py owns.
 PAUSE_BY_ENDING = {
-    ".": 0.30,
-    "?": 0.38,
-    "!": 0.32,
-    ":": 0.26,
-    ";": 0.22,
-    ",": 0.13,
-    "": 0.20,
+    ".": 0.20,
+    "?": 0.26,
+    "!": 0.22,
+    ":": 0.17,
+    ";": 0.15,
+    ",": 0.09,
+    "": 0.14,
 }
 PAUSE_JITTER = 0.05
 
