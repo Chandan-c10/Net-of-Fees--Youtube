@@ -233,3 +233,29 @@ def test_the_assembled_video_carries_stereo_audio(tmp_path):
                   Path("pipeline/stages/motion_assemble.py")):
         if stage.exists():
             assert '"-ac", "2"' in stage.read_text(), f"{stage} does not upmix"
+
+
+@needs_ffmpeg
+def test_the_publishing_folder_holds_only_the_deliverable(tmp_path, manifest):
+    """out/ is what an operator uploads from. A pre-grade backup sitting
+    beside the finished file looks like a second deliverable."""
+    import subprocess
+
+    from pipeline.manifest import Episode
+    from pipeline.stages import finish
+
+    ep = Episode("one", tmp_path)
+    ep.ensure_dirs()
+    ep.video.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [ffmpeg(), "-y", "-v", "error",
+         "-f", "lavfi", "-i", "testsrc=size=1080x1920:rate=30",
+         "-f", "lavfi", "-i", "sine=frequency=440",
+         "-t", "2", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+         "-c:a", "aac", str(ep.video)],
+        capture_output=True, timeout=120, check=False)
+
+    finish.run(ep, manifest, look_name="clean")
+
+    videos = sorted(p.name for p in ep.out_dir.glob("*.mp4"))
+    assert videos == ["video.mp4"], f"out/ also contains {videos}"

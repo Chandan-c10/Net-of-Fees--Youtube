@@ -142,7 +142,13 @@ def run(ep: Episode, m: Manifest, look_name: str = "clean",
     width, height = frame_size(ep.video)
     spec = replace(spec, width=width, height=height)
 
-    raw = ep.out_dir / "video.raw.mp4"
+    # Kept outside out/, which is the publishing folder: a backup sitting
+    # beside the deliverable looks like a second deliverable, and the one
+    # thing an operator must not have to do is work out which of two
+    # videos to upload.
+    work = ep.dir / "work"
+    work.mkdir(parents=True, exist_ok=True)
+    raw = work / "video.pre-grade.mp4"
     ep.video.replace(raw)
 
     run_ffmpeg([
