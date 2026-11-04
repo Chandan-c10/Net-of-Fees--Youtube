@@ -134,7 +134,7 @@ def frame_count(duration_sec: float, fps: int) -> int:
     """
     if duration_sec <= 0:
         raise StageError(f"cannot render a clip of {duration_sec}s")
-    return max(2, int(round(duration_sec * fps)))
+    return max(2, round(duration_sec * fps))
 
 
 def plan_frames(durations: list[float], fps: int) -> list[int]:
@@ -151,7 +151,7 @@ def plan_frames(durations: list[float], fps: int) -> list[int]:
     counts, elapsed, emitted = [], 0.0, 0
     for duration in durations:
         elapsed += duration
-        target = int(round(elapsed * fps))
+        target = round(elapsed * fps)
         count = max(2, target - emitted)
         counts.append(count)
         emitted += count
@@ -195,7 +195,7 @@ def filter_chain(move: Move, frames: int, spec: VideoSpec) -> str:
     # ratio 0.562, which is exactly 9/16. Cover the target first, then
     # crop to it, then move within that.
     canvas_w = target
-    canvas_h = int(round(target * spec.height / spec.width))
+    canvas_h = round(target * spec.height / spec.width)
     chain = (
         f"scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=increase"
         f":flags=lanczos,"

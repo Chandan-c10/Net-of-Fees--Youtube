@@ -7,6 +7,7 @@ comes out the length the audio asked for.
 
 from __future__ import annotations
 
+import itertools
 import subprocess
 
 import pytest
@@ -107,8 +108,8 @@ def test_excluding_everything_still_returns_a_move():
 def test_no_move_repeats_or_alternates(episode):
     """A-A-A reads as automated, and so does A-B-A-B."""
     names = [m.name for m in kenburns.plan_moves(12, episode)]
-    assert not any(a == b for a, b in zip(names, names[1:])), "repeat"
-    assert not any(a == b for a, b in zip(names, names[2:])), "alternation"
+    assert not any(a == b for a, b in itertools.pairwise(names)), "repeat"
+    assert not any(a == b for a, b in zip(names, names[2:], strict=False)), "alternation"
 
 
 # ---- the filter -------------------------------------------------------
@@ -191,7 +192,7 @@ def test_a_planned_sequence_renders_to_the_right_total(still, tmp_path):
     durations = [3.0, 4.35, 2.812]
     plan = kenburns.plan_frames(durations, LONGFORM.fps)
     total = 0.0
-    for i, (duration, frames) in enumerate(zip(durations, plan), 1):
+    for i, (duration, frames) in enumerate(zip(durations, plan, strict=False), 1):
         out = tmp_path / f"clip_{i}.mp4"
         kenburns.render(still, out, duration, LONGFORM,
                         scene_index=i, episode_id="t", frames=frames)

@@ -170,7 +170,7 @@ def render_caption_strip(text: str, spec: VideoSpec, out: Path) -> Path:
         rest = " ".join(lines[MAX_CAPTION_LINES - 1:])
         while rest and draw.textlength(rest + "\u2026", font=font) > max_px:
             rest = rest.rsplit(" ", 1)[0]
-        lines = kept + [rest + "\u2026"]
+        lines = [*kept, rest + "…"]
 
     line_h = int(size * 1.34)
     block_h = line_h * len(lines)

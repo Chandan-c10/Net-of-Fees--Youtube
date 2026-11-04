@@ -160,7 +160,7 @@ class Ledger:
     def _trim(self) -> None:
         resolved = [i for i in self.incidents if not i.open]
         if len(resolved) > MAX_RESOLVED:
-            keep = set(id(i) for i in resolved[-MAX_RESOLVED:])
+            keep = {id(i) for i in resolved[-MAX_RESOLVED:]}
             self.incidents = [i for i in self.incidents
                               if i.open or id(i) in keep]
         self.runs = self.runs[-MAX_RUNS:]
