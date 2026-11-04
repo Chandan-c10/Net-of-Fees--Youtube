@@ -61,6 +61,15 @@ def _episode(episode_id: str) -> Episode:
     return Episode(episode_id, config.EPISODES_DIR)
 
 
+def _episode_ids() -> list[str]:
+    """Every episode on disk."""
+    if not config.EPISODES_DIR.exists():
+        return []
+    return [d.name for d in config.EPISODES_DIR.iterdir()
+            if d.is_dir() and EPISODE_ID.match(d.name)
+            and (d / "manifest.json").exists()]
+
+
 def _next_id() -> str:
     config.EPISODES_DIR.mkdir(parents=True, exist_ok=True)
     existing = [d.name for d in config.EPISODES_DIR.iterdir() if d.is_dir()]
@@ -97,7 +106,8 @@ def _run_stage(name: str, ep: Episode, m: Manifest, settings, args) -> None:
         if getattr(profile, "MOTION", None) == "kenburns":
             from pipeline.stages import motion_assemble
             motion_assemble.run(ep, m, burn_captions=not args.no_captions,
-                                profile=profile, music=not args.no_music)
+                                profile=profile, music=not args.no_music,
+                                ambient=not args.no_ambience)
         else:
             assemble.run(ep, m, burn_captions=not args.no_captions,
                          profile=profile, animate=not args.no_animate,
@@ -389,6 +399,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("notify-test",
                    help="send a test failure alert").set_defaults(func=cmd_notify_test)
 
+    pd = sub.add_parser("publish-due",
+                        help="publish approved episodes whose slot arrived")
+    pd.add_argument("--dry-run", action="store_true")
+    pd.add_argument("--no-instagram", action="store_true")
+    pd.add_argument("-v", "--verbose", action="store_true")
+    pd.set_defaults(func=cmd_publish_due)
+
     he = sub.add_parser("health", help="what has been breaking")
     he.add_argument("--hours", type=int, default=24)
     he.add_argument("--mail", action="store_true",
@@ -499,6 +516,55 @@ def cmd_health(args) -> int:
     return 1 if open_now else 0
 
 
+def cmd_publish_due(args) -> int:
+    """Publish every approved episode whose slot has arrived.
+
+    Safe to run on a timer. It publishes only what a person has already
+    approved -- gates.py refuses to clear a gate during a scheduled run,
+    so this can never approve anything itself.
+    """
+    from pipeline import schedule
+    logging_setup.configure(None, args.verbose)
+    log = logging_setup.get(None, "publish-due")
+
+    manifests = []
+    for episode_id in sorted(_episode_ids()):
+        ep = _episode(episode_id)
+        try:
+            manifests.append((ep, ep.load_manifest()))
+        except PipelineError as exc:
+            log.warning(f"{episode_id}: {exc}")
+
+    due = schedule.due_episodes([m for _, m in manifests])
+    if not due:
+        print("\n  nothing due\n")
+        return 0
+
+    published = 0
+    for ep, m in manifests:
+        if m not in due:
+            continue
+        print(f"\n  {m.id}: {m.title}")
+        if args.dry_run:
+            print(f"    would publish ({m.publish_mode})")
+            continue
+        try:
+            upload.run(ep, m, dry_run=False)
+            if not args.no_instagram:
+                instagram.run(ep, m, dry_run=False)
+            ep.save_manifest(m)
+            notify.recovered(m.id, "upload")
+            published += 1
+            print("    published")
+        except PipelineError as exc:
+            ep.save_manifest(m)
+            exc.episode_id, exc.stage = m.id, "upload"
+            notify.failure(m.id, "upload", exc, str(ep.log))
+            print(f"    FAILED: {exc}")
+    print(f"\n  {published} of {len(due)} published\n")
+    return 0 if published == len(due) else 1
+
+
 def cmd_notify_test(args) -> int:
     ok, detail = notify.test_channel()
     print(f"\n  alerts: {'ok' if ok else 'not working'}  —  {detail}\n")
@@ -534,7 +600,7 @@ def main(argv: list[str] | None = None) -> int:
     # `run.py 001 ...` is the common path; route it without a subcommand.
     if argv and not argv[0].startswith("-") and argv[0] not in {
         "new", "list", "status", "doctor", "voices", "notify-test",
-        "dashboard", "trends", "health"
+        "dashboard", "trends", "health", "publish-due"
     }:
         rp = argparse.ArgumentParser(prog="run.py <id>")
         rp.add_argument("id")
@@ -559,6 +625,8 @@ def main(argv: list[str] | None = None) -> int:
         rp.add_argument("--no-animate", action="store_true")
         rp.add_argument("--no-dissolve", action="store_true")
         rp.add_argument("--no-music", action="store_true")
+        rp.add_argument("--no-ambience", action="store_true",
+                        help="skip the per-scene ambient beds")
         rp.add_argument("--look", default="clean",
                         choices=("clean", "filmic", "none"))
         rp.add_argument("--voice-engine", default=config.load().voice_engine,

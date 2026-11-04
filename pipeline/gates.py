@@ -118,5 +118,11 @@ def approve_gate_2(ep: Episode, m: Manifest) -> None:
     if blockers:
         raise GateError("; ".join(blockers))
     m.pass_gate_2()
+    if m.publish_mode == "at_slot" and not m.publish_after:
+        from .schedule import next_slot
+        m.publish_after = next_slot().isoformat()
     ep.save_manifest(m)
-    get(m.id, "gate").info("gate 2 cleared")
+    log = get(m.id, "gate")
+    log.info("gate 2 cleared")
+    if m.publish_mode != "manual":
+        log.info(f"will publish automatically ({m.publish_mode})")

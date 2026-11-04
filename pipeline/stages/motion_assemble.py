@@ -129,7 +129,8 @@ def build_clip_list(clips: list[Path], path: Path) -> Path:
 
 def run(ep: Episode, m: Manifest, spec: VideoSpec = LONGFORM,
         burn_captions: bool = True, master_audio: bool = True,
-        profile=None, music: bool = True) -> Path:
+        profile=None, music: bool = True,
+        ambient: bool = True) -> Path:
     """Assemble an episode of moving stills."""
     log = get(m.id, "assemble")
     if not m.scenes:
@@ -141,6 +142,14 @@ def run(ep: Episode, m: Manifest, spec: VideoSpec = LONGFORM,
             )
 
     audio = voice_process.run(ep, m, master=master_audio)
+    if ambient:
+        from ..config import ROOT
+        from . import ambience as ambience_stage
+        # Under the music bed, per scene: a village street and a kitchen
+        # sound different, and the absence is noticed before it is named.
+        audio = ambience_stage.apply_if_available(
+            ROOT, audio, m.scenes, m.total_duration(), m.id,
+            work=ep.dir / "work" / "ambience")
     if music:
         from ..config import ROOT
         audio = music_bed(ROOT, audio, m)
@@ -198,11 +207,22 @@ def run(ep: Episode, m: Manifest, spec: VideoSpec = LONGFORM,
         drift_sec=round(drift, 4),
         scenes=len(clips),
         path="motion",
+        ambience=ambience_moods(ep, m) if ambient else [],
         moves=[mv.name for mv in moves],
     )
     log.info(f"{actual:.2f}s from {len(clips)} moving stills, "
              f"drift {drift * 1000:.0f}ms")
     return ep.video
+
+
+def ambience_moods(ep: Episode, m: Manifest) -> list[str]:
+    """What each scene was scored as, for the manifest."""
+    from ..config import ROOT
+    from . import ambience as ambience_stage
+    try:
+        return ambience_stage.describe(m.scenes, ROOT)["moods"]
+    except StageError:
+        return []
 
 
 def music_bed(root: Path, audio: Path, m: Manifest) -> Path:

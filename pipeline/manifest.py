@@ -41,6 +41,8 @@ GATE_2_STAGES = ("shorts", "upload", "instagram")
 # entirely, so they are exempt from each other's prerequisites.
 PUBLISH_STAGES = ("upload", "instagram")
 
+PUBLISH_MODES = ("manual", "on_approval", "at_slot")
+
 
 def _utcnow() -> str:
     return datetime.now(UTC).isoformat()
@@ -90,6 +92,19 @@ class Manifest:
     published_at: str | None = None
     snapshot_sha256: str | None = None
     chosen_thumbnail: int | None = None
+    # How this episode leaves the building once it is approved.
+    #
+    #   manual       someone presses publish          (the default)
+    #   on_approval  it goes out as soon as it is approved
+    #   at_slot      it waits for the next publishing slot
+    #
+    # None of these skip Gate 2. A human still approves every episode;
+    # what this controls is whether a second deliberate action is needed
+    # afterwards. gates.py independently refuses to clear a gate during a
+    # scheduled run, so a timer can post what you approved and can never
+    # approve anything itself.
+    publish_mode: str = "manual"
+    publish_after: str | None = None
     platform_posts: list[dict[str, Any]] = field(default_factory=list)
 
     # ---- construction -------------------------------------------------

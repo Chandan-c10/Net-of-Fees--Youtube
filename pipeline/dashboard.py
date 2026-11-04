@@ -46,6 +46,7 @@ import threading
 import time
 import urllib.parse
 from collections import deque
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -150,6 +151,10 @@ class Panel:
         self.log = get(None, "dashboard")
         self.lock = threading.Lock()
         self.job: Job | None = None
+        # Episodes approved with publish_mode == "on_approval". The
+        # publish is started after the lock is released, because
+        # start_job takes the same lock.
+        self._auto_publish: list[str] = []
 
     # ---- episodes -----------------------------------------------------
 
@@ -187,6 +192,8 @@ class Panel:
             "gate_1_blockers": gates.gate_1_blockers(ep, m),
             "gate_2_blockers": gates.gate_2_blockers(m),
             "chosen_thumbnail": m.chosen_thumbnail,
+            "publish_mode": m.publish_mode,
+            "publish_after": m.publish_after,
             "draft_voice": bool(m.stage("voice").data.get("draft")),
             "scrub_findings": m.stage("scrub").data.get("findings", 0),
             "duration_sec": m.stage("assemble").data.get("duration_sec"),
@@ -205,7 +212,39 @@ class Panel:
                 gates.approve_gate_1(ep, m)
                 return f"Gate 1 cleared for {episode_id}."
             gates.approve_gate_2(ep, m)
-            return f"Gate 2 cleared for {episode_id}."
+            message = f"Gate 2 cleared for {episode_id}."
+            if m.publish_mode == "on_approval":
+                self._auto_publish.append(episode_id)
+                message += " Publishing now."
+            elif m.publish_mode == "at_slot":
+                when = (m.publish_after or "")[:16].replace("T", " ")
+                message += f" Will publish at {when}."
+            return message
+
+    def set_publish_mode(self, episode_id: str, mode: str) -> str:
+        """How this episode leaves once approved.
+
+        Never touches the gate. A person still approves every episode;
+        this only decides whether a second manual action is needed after
+        that.
+        """
+        from .manifest import PUBLISH_MODES
+        if mode not in PUBLISH_MODES:
+            raise PipelineError(
+                f"unknown publish mode {mode!r}; expected "
+                f"{', '.join(PUBLISH_MODES)}")
+        with self.lock:
+            ep, m = self.load(episode_id)
+            m.publish_mode = mode
+            if mode == "at_slot" and m.approved_at and not m.publish_after:
+                from .schedule import next_slot
+                m.publish_after = next_slot().isoformat()
+            ep.save_manifest(m)
+            return {
+                "manual": "Will wait for you to press publish.",
+                "on_approval": "Will publish as soon as it is approved.",
+                "at_slot": "Will publish at the next slot after approval.",
+            }[mode]
 
     def choose_thumbnail(self, episode_id: str, n: int) -> str:
         with self.lock:
@@ -253,6 +292,21 @@ class Panel:
                     else f"Scene {index} cleared.")
 
     # ---- jobs ---------------------------------------------------------
+
+    def drain_auto_publish(self) -> str | None:
+        """Start a publish for anything approved with on_approval set.
+
+        Called after `approve` returns, outside its lock. Returns a note
+        to append to the message, or None.
+        """
+        if not self._auto_publish:
+            return None
+        episode_id = self._auto_publish.pop(0)
+        try:
+            return self.start_job(episode_id, [episode_id, "--publish"],
+                                  "publish on approval")
+        except PipelineError as exc:
+            return f"Could not start publishing: {exc}"
 
     def start_job(self, episode_id: str, argv: list[str], label: str) -> str:
         """One job at a time: renders are CPU-bound, and two of them on
@@ -313,6 +367,75 @@ class Panel:
         if not target.is_file():
             raise PipelineError("no such asset")
         return target
+
+
+@dataclass(frozen=True)
+class Standing:
+    """Where an episode sits, from the operator's point of view.
+
+    The sidebar in most tools lists features. This lists states, because
+    the only question someone opens this panel to answer is "what needs
+    me now" -- and an episode either needs a decision, is working, or is
+    finished.
+    """
+
+    group: str        # "needs_you" | "running" | "done"
+    label: str        # what is true
+    detail: str       # why, in one line
+    order: int        # within the group; lower is more urgent
+
+
+# Ordered by how much they cost to ignore. A failure that has stopped the
+# line outranks a script nobody has read yet.
+FAILED, GATE_2, GATE_1, BLOCKED, PUBLISHABLE = 0, 1, 2, 3, 4
+
+
+def standing_of(summary: dict, running: bool) -> Standing:
+    """Classify one episode. Pure, so it is testable without a server."""
+    if running:
+        return Standing("running", "working", "a job is running", 0)
+
+    failed = [name for name, state in summary["stages"].items()
+              if state == "failed"]
+    if failed:
+        return Standing("needs_you", "failed",
+                        f"{failed[0]} stopped; it needs a person", FAILED)
+
+    if summary["published"]:
+        return Standing("done", "published", "live", 0)
+
+    if summary["gate_2"]:
+        return Standing("needs_you", "ready to publish",
+                        "approved and waiting to go out", PUBLISHABLE)
+
+    # A gate with no blockers is a decision waiting. A gate with blockers
+    # is work waiting, and saying which is the whole point.
+    if summary["gate_1"]:
+        blockers = summary["gate_2_blockers"]
+        if not blockers:
+            return Standing("needs_you", "video ready",
+                            "watch it and approve", GATE_2)
+        return Standing("running" if _is_automatic(blockers) else "needs_you",
+                        "rendering" if _is_automatic(blockers) else "blocked",
+                        blockers[0], BLOCKED)
+
+    blockers = summary["gate_1_blockers"]
+    if not blockers:
+        return Standing("needs_you", "script ready",
+                        "read it and approve", GATE_1)
+    return Standing("running" if _is_automatic(blockers) else "needs_you",
+                    "drafting" if _is_automatic(blockers) else "blocked",
+                    blockers[0], BLOCKED)
+
+
+# Blockers that clear themselves by running the next stage, rather than
+# by someone doing something. These are progress, not problems.
+_AUTOMATIC = ("is not complete", "has not passed", "no scenes",
+              "data snapshot is missing")
+
+
+def _is_automatic(blockers: list[str]) -> bool:
+    return all(any(hint in b for hint in _AUTOMATIC) for b in blockers)
 
 
 def _stage_state(m: Manifest, name: str) -> str:
@@ -513,32 +636,99 @@ def _post(action: str, token: str | None, label: str,
             f'{fields}<button type="submit"{attrs}>{label}</button></form>')
 
 
+def _queue_card(panel: Panel, episode_id: str, summary: dict,
+                standing: Standing) -> str:
+    """One row of the queue, with its action on it.
+
+    The action is here rather than behind a click: the whole point of the
+    queue is that opening it and acting are the same gesture.
+    """
+    t = panel.token
+    tone = {"failed": "bad", "blocked": "bad",
+            "ready to publish": "ok"}.get(standing.label, "open")
+    length = (f' &middot; {summary["duration_sec"]}s'
+              if summary["duration_sec"] else "")
+
+    action = ""
+    if standing.label == "script ready":
+        action = _post(f"/episode/{episode_id}/approve-1", t,
+                       "Approve the script", cls="small")
+    elif standing.label == "video ready":
+        action = _post(f"/episode/{episode_id}/approve-2", t,
+                       "Approve for publishing", cls="small")
+    elif standing.label == "ready to publish":
+        action = _post(
+            f"/episode/{episode_id}/publish", t, "Publish",
+            fields='<input type="hidden" name="confirm" value="1">',
+            cls="small danger",
+            confirm="This uploads for real. Continue?")
+
+    return f"""<div class="card"><div class="row">
+  <div class="grow"><h3><a href="/episode/{episode_id}{_q(t)}">
+    {_esc(summary["title"])}</a></h3>
+    <span class="n">{episode_id} &middot; {_esc(summary["profile"])}{length}</span>
+    <p class="n" style="margin:6px 0 0">{_esc(standing.detail)}</p></div>
+  <div class="acts"><span class="tag {tone}">{_esc(standing.label)}</span>
+    {action}</div></div></div>"""
+
+
 def render_index(panel: Panel, flash: tuple[str, bool] | None) -> bytes:
+    """The work queue.
+
+    Grouped by state rather than listed by date, because the only
+    question this page exists to answer is what needs a person now.
+    Everything else is machinery reporting that it is fine.
+    """
     import profiles
 
     from .recipes import available as available_recipes
     t = panel.token
-    ids = panel.episode_ids()
-    parts = ['<div class="row"><div class="grow"><h1>Net of Fees</h1>'
-             '<p class="sub">Review, approve and publish. '
-             'Nothing goes out until you say so.</p></div>'
-             f'<a class="btn ghost" href="/health{_q(t)}">System</a></div>']
+    job = panel.job_snapshot()
+    running_id = job["episode"] if job and job["running"] else None
+
+    groups: dict[str, list] = {"needs_you": [], "running": [], "done": []}
+    for episode_id in panel.episode_ids():
+        summary = panel.summary(episode_id)
+        standing = standing_of(summary, episode_id == running_id)
+        groups[standing.group].append((standing.order, episode_id,
+                                       summary, standing))
+    for rows in groups.values():
+        rows.sort(key=lambda r: (r[0], r[1]))
+
+    waiting = len(groups["needs_you"])
+    parts = [
+        '<div class="row"><div class="grow">'
+        f'<h1>{waiting} waiting for you</h1>'
+        '<p class="sub">Everything else is running or finished.</p></div>'
+        f'<a class="btn ghost" href="/health{_q(t)}">System</a></div>'
+    ]
     if flash:
         parts.append(_flash(flash))
 
-    job = panel.job_snapshot()
-    if job and job["running"]:
-        parts.append(
-            f'<div class="card"><h3><span class="spin"></span>'
-            f'{_esc(job["label"])} on {_esc(job["episode"])}</h3>'
-            f'<p class="n">Open that episode to watch the log.</p></div>')
+    if not waiting:
+        parts.append('<div class="card empty">Nothing needs a decision. '
+                     'Make a new episode below, or come back later.</div>')
+    for _, episode_id, summary, standing in groups["needs_you"]:
+        parts.append(_queue_card(panel, episode_id, summary, standing))
 
+    if groups["running"]:
+        parts.append(f'<h2>Working ({len(groups["running"])})</h2>')
+        for _, episode_id, summary, standing in groups["running"]:
+            spin = '<span class="spin"></span>' if episode_id == running_id else ""
+            parts.append(f"""<div class="card"><div class="row">
+  <div class="grow"><h3>{spin}<a href="/episode/{episode_id}{_q(t)}">
+    {_esc(summary["title"])}</a></h3>
+    <span class="n">{episode_id} &middot; {_esc(standing.detail)}</span></div>
+  <span class="tag">{_esc(standing.label)}</span></div></div>""")
+
+    # New episodes and finished ones are both secondary to the queue, so
+    # they sit below it rather than competing with it.
     profile_opts = "".join(
         f'<option value="{_esc(p)}">{_esc(p)}</option>'
         for p in profiles.available() if not p.endswith("_shorts"))
     recipe_opts = "".join(f'<option value="{_esc(r)}">{_esc(r)}</option>'
                           for r in available_recipes())
-    parts.append(f"""<div class="card"><h3>New episode</h3>
+    parts.append(f"""<h2>New episode</h2><div class="card">
 <form method="post" action="/new">{_tok(t)}
   <div class="fields">
     <div><label for="profile">Profile</label>
@@ -548,38 +738,16 @@ def render_index(panel: Panel, flash: tuple[str, bool] | None) -> bytes:
     <div><label for="id">Id (optional)</label>
       <input id="id" type="text" name="id" placeholder="auto"></div>
     <button type="submit">Create</button>
-  </div></form>
-<p class="n">Creates the episode and exports its data. The script, the
-render and publishing are each a separate step you trigger.</p></div>""")
+  </div></form></div>""")
 
-    parts.append("<h2>Episodes</h2>")
-    if not ids:
-        parts.append('<div class="card empty">None yet.</div>')
-    for episode_id in ids:
-        s = panel.summary(episode_id)
-        if s["published"]:
-            state = '<span class="tag ok">published</span>'
-        elif s["gate_2"]:
-            state = '<span class="tag ok">approved</span>'
-        elif s["gate_1"]:
-            state = '<span class="tag open">at gate 2</span>'
-        else:
-            state = '<span class="tag open">at gate 1</span>'
-        flags = ""
-        if s["draft_voice"]:
-            flags += ' <span class="tag bad">draft voice</span>'
-        if s["scrub_findings"]:
-            flags += f' <span class="tag bad">{s["scrub_findings"]} scrub</span>'
-        pills = "".join(f'<span class="pill {s["stages"][st]}">{st}</span>'
-                        for st in STAGES)
-        length = (f' &middot; {s["duration_sec"]}s'
-                  if s["duration_sec"] else "")
-        parts.append(f"""<div class="card"><div class="row">
-  <div class="grow"><h3><a href="/episode/{episode_id}{_q(t)}">
-    {_esc(s["title"])}</a></h3>
-    <span class="n">{episode_id} &middot; {_esc(s["profile"])}
-      &middot; tier {_esc(s["tier"])}{length}</span></div>
-  {state}{flags}</div><div class="pills">{pills}</div></div>""")
+    if groups["done"]:
+        rows = "".join(
+            f'<p class="n"><a href="/episode/{eid}{_q(t)}">{_esc(sm["title"])}'
+            f'</a> &middot; {eid}</p>'
+            for _, eid, sm, _st in groups["done"])
+        parts.append(f'<h2>Published ({len(groups["done"])})</h2>'
+                     f'<div class="card">{rows}</div>')
+
     return _page("Net of Fees", "".join(parts))
 
 
@@ -814,9 +982,30 @@ def _publish_block(episode_id: str, s: dict, token: str | None,
                      f'{" &middot; " + _esc(row["error"])[:120] if row.get("error") else ""}</p>')
     history = "".join(posts) or '<p class="n">Nothing published yet.</p>'
 
+    modes = {
+        "manual": "Wait for me to press publish",
+        "on_approval": "Publish as soon as I approve it",
+        "at_slot": "Publish at the next slot after I approve it",
+    }
+    current = s.get("publish_mode", "manual")
+    options = "".join(
+        f'<option value="{key}"{" selected" if key == current else ""}>'
+        f'{label}</option>' for key, label in modes.items())
+    chooser = f"""<div class="card"><h3>After approval</h3>
+  <p class="n">Approving is always yours. This only decides whether a
+  second press is needed afterwards.</p>
+  <form method="post" action="/episode/{episode_id}/publish-mode">
+    {_tok(token)}<div class="fields">
+      <div><label for="mode">When approved</label>
+        <select id="mode" name="mode">{options}</select></div>
+      <button class="ghost" type="submit">Save</button>
+    </div></form>{
+      f'<p class="n">Scheduled for {_esc((s.get("publish_after") or "")[:16].replace("T", " "))}</p>'
+      if s.get("publish_after") and current == "at_slot" else ""}</div>"""
+
     if not s["gate_2"]:
-        return (f'<div class="card"><p class="empty">Clear gate 2 first.</p>'
-                f'{history}</div>')
+        return (f'{chooser}<div class="card">'
+                f'<p class="empty">Clear gate 2 first.</p>{history}</div>')
     dry = _post(f"/episode/{episode_id}/publish", token,
                 "Dry run (nothing leaves the machine)",
                 fields='<input type="hidden" name="dry" value="1">',
@@ -838,7 +1027,7 @@ def _publish_block(episode_id: str, s: dict, token: str | None,
                '<input type="hidden" name="only" value="instagram">',
         cls="ghost", disabled=running,
         confirm="This posts a Reel for real. Continue?")
-    return f"""<div class="card"><h3>Publish</h3>
+    return chooser + f"""<div class="card"><h3>Publish</h3>
 <p class="n">Uploads are private on YouTube by default. Publishing cannot
 be undone from here.</p>
 <div class="acts" style="margin-top:12px">{dry}{yt}{ig}{both}</div>
@@ -994,7 +1183,12 @@ class Handler(BaseHTTPRequestHandler):
         if action == "approve-1":
             return panel.approve(episode_id, 1)
         if action == "approve-2":
-            return panel.approve(episode_id, 2)
+            message = panel.approve(episode_id, 2)
+            started = panel.drain_auto_publish()
+            return f"{message} {started}" if started else message
+        if action == "publish-mode":
+            return panel.set_publish_mode(episode_id,
+                                          form.get("mode", "manual"))
         if action == "thumbnail":
             return panel.choose_thumbnail(episode_id, int(form.get("n", "0")))
         if action == "title":
