@@ -19,3 +19,4 @@ data/incidents.json
 # episode scripts -- so it goes stale. Regenerate rather than commit it.
 voices/*/RECORDING.md
 state/
+secrets/panel.json

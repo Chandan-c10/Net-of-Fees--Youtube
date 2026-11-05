@@ -399,6 +399,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("notify-test",
                    help="send a test failure alert").set_defaults(func=cmd_notify_test)
 
+    cn = sub.add_parser("connect", help="authorise a YouTube channel")
+    cn.add_argument("--channel", help="for a second channel")
+    cn.set_defaults(func=cmd_connect)
+
     ba = sub.add_parser("batch", help="draft several episodes at once")
     ba.add_argument("--count", type=int,
                     help=f"default {config.BATCH_SIZE} (BATCH_SIZE)")
@@ -529,6 +533,22 @@ def cmd_health(args) -> int:
         print("  mailed the open list\n" if open_now
               else "  nothing open, so nothing mailed\n")
     return 1 if open_now else 0
+
+
+def cmd_connect(args) -> int:
+    """Authorise a YouTube channel through Google's loopback OAuth.
+
+    The same flow tools/youtube_auth.py runs; here so the panel can
+    start it. A browser opens on this machine, which is why it works
+    locally and would not work from a hosted panel.
+    """
+    import subprocess
+    import sys as _sys
+    tool = Path(__file__).resolve().parent / "tools" / "youtube_auth.py"
+    argv = ["--channel", args.channel] if args.channel else []
+    proc = subprocess.run([_sys.executable, str(tool), *argv],
+                          timeout=600, check=False)
+    return proc.returncode
 
 
 def cmd_batch(args) -> int:
@@ -676,7 +696,7 @@ def main(argv: list[str] | None = None) -> int:
     # `run.py 001 ...` is the common path; route it without a subcommand.
     if argv and not argv[0].startswith("-") and argv[0] not in {
         "new", "list", "status", "doctor", "voices", "notify-test",
-        "dashboard", "trends", "health", "publish-due", "batch"
+        "dashboard", "trends", "health", "publish-due", "batch", "connect"
     }:
         rp = argparse.ArgumentParser(prog="run.py <id>")
         rp.add_argument("id")

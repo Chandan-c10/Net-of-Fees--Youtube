@@ -50,7 +50,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import config, gates, platform_support
+from . import config, gates, panel_auth, platform_support, settings_store
 from .errors import GateError, PipelineError
 from .logging_setup import get
 from .manifest import STAGES, Episode, Manifest
@@ -155,6 +155,10 @@ class Panel:
         # publish is started after the lock is released, because
         # start_job takes the same lock.
         self._auto_publish: list[str] = []
+        # Optional. With no password set, a localhost panel behaves as it
+        # always has; setting one makes it required everywhere.
+        self.credentials = panel_auth.Credentials()
+        self.sessions = panel_auth.Sessions()
 
     # ---- episodes -----------------------------------------------------
 
@@ -700,6 +704,7 @@ def render_index(panel: Panel, flash: tuple[str, bool] | None) -> bytes:
         '<div class="row"><div class="grow">'
         f'<h1>{waiting} waiting for you</h1>'
         '<p class="sub">Everything else is running or finished.</p></div>'
+        f'<a class="btn ghost" href="/settings{_q(t)}">Settings</a> '
         f'<a class="btn ghost" href="/health{_q(t)}">System</a></div>'
     ]
     if flash:
@@ -749,6 +754,139 @@ def render_index(panel: Panel, flash: tuple[str, bool] | None) -> bytes:
                      f'<div class="card">{rows}</div>')
 
     return _page("Net of Fees", "".join(parts))
+
+
+def render_login(panel: Panel, message: str = "",
+                 first_run: bool = False) -> bytes:
+    """The sign-in page, or the one that sets a password the first time."""
+    locked = panel.credentials.locked_for
+    if locked:
+        message = f"Too many attempts. Try again in {locked} seconds."
+    title = "Set a password" if first_run else "Sign in"
+    note = ("This panel can publish to your channel, so give it a real "
+            f"password of at least {panel_auth.MIN_PASSWORD} characters."
+            if first_run else "")
+    second = ('<div><label for="again">Repeat it</label>'
+              '<input id="again" type="password" name="again" '
+              'autocomplete="new-password"></div>') if first_run else ""
+    action = "/set-password" if first_run else "/login"
+    body = f"""<h1>{title}</h1>
+<p class="sub">{_esc(note) or "Net of Fees control panel"}</p>
+{f'<div class="flash bad">{_esc(message)}</div>' if message else ""}
+<div class="card"><form method="post" action="{action}">
+  <div class="fields">
+    <div><label for="password">Password</label>
+      <input id="password" type="password" name="password"
+             autocomplete="{'new-password' if first_run else 'current-password'}"
+             autofocus></div>
+    {second}
+    <button type="submit">{title}</button>
+  </div></form></div>"""
+    return _page(title, body)
+
+
+SETTING_GROUPS = (
+    ("Alerts", "Mailed when something breaks. Nothing else is sent.",
+     ("ALERT_EMAIL", "SMTP_HOST", "SMTP_PORT", "SMTP_USER",
+      "SMTP_APP_PASSWORD")),
+    ("Schedule", "The number of slots is also the episodes released a day.",
+     ("PUBLISH_SLOTS", "CHANNEL_TZ", "BATCH_SIZE", "MAX_QUEUE_DAYS")),
+    ("Voice", "VOICE_SPEED above 1.4 starts to sound hurried.",
+     ("VOICE", "VOICE_ENGINE", "VOICE_SPEED")),
+    ("Instagram", "Meta requires an HTTPS redirect, so the token is pasted "
+                  "rather than connected here.",
+     ("IG_USER_ID", "IG_ACCESS_TOKEN")),
+    ("Content", "Defaults for new episodes and the trend scan.",
+     ("PROFILE", "SCRIPT_ENGINE", "GEMINI_API_KEY", "YOUTUBE_API_KEY",
+      "TREND_REGION")),
+)
+
+
+def render_settings(panel: Panel, flash: tuple[str, bool] | None) -> bytes:
+    """Credentials and defaults.
+
+    A secret is never rendered back -- a field carrying its own value is
+    one that leaks to a screenshot or a password manager. Each shows only
+    whether it is set, and leaving it blank keeps what is there.
+    """
+    t = panel.token
+    current = settings_store.describe()
+    try:
+        from . import channels as channels_mod
+        channels = {k: channels_mod.describe(k) for k in channels_mod.known()}
+    except Exception:
+        channels = {}
+
+    parts = [f'<p><a href="/{_q(t)}">&larr; queue</a></p>',
+             "<h1>Settings</h1>",
+             '<p class="sub">Stored in .env on this machine. Secrets are '
+             'never shown back; leave a field blank to keep it.</p>']
+    if flash:
+        parts.append(_flash(flash))
+
+    rows = []
+    for key, info in channels.items():
+        ok = "(present)" in info["youtube"]
+        tone = "ok" if ok else "open"
+        rows.append(f'<p class="n"><span class="tag {tone}">{_esc(key)}'
+                    f'</span> {_esc(info["youtube"])}</p>')
+    connect = _post("/connect-youtube", t, "Connect a YouTube channel",
+                    cls="ghost")
+    empty = '<p class="n">No channels configured.</p>'
+    parts.append(
+        '<div class="card"><h3>YouTube</h3>' + ("".join(rows) or empty)
+        + '<p class="n">Opens Google&rsquo;s consent screen in a browser '
+          'on this machine. Needs secrets/client_secret.json from the '
+          'Cloud console.</p>'
+        + f'<div class="acts" style="margin-top:10px">{connect}</div></div>')
+
+    form_parts = []
+    for title, note, names in SETTING_GROUPS:
+        fields = []
+        for name in names:
+            info = current.get(name, {})
+            if info.get("secret"):
+                state = "set" if info.get("set") else "not set"
+                tone = "ok" if info.get("set") else ""
+                fields.append(
+                    f'<div><label for="{name}">{name} '
+                    f'<span class="tag {tone}">{state}</span></label>'
+                    f'<input id="{name}" type="password" name="{name}" '
+                    f'placeholder="unchanged" autocomplete="new-password">'
+                    f'</div>')
+            else:
+                fields.append(
+                    f'<div><label for="{name}">{name}</label>'
+                    f'<input id="{name}" type="text" name="{name}" '
+                    f'value="{_esc(info.get("value", ""))}"></div>')
+        form_parts.append(f'<div class="card"><h3>{_esc(title)}</h3>'
+                          f'<p class="n">{_esc(note)}</p>'
+                          f'<div class="fields">{"".join(fields)}</div></div>')
+    parts.append(
+        f'<form method="post" action="/settings">{_tok(t)}'
+        + "".join(form_parts)
+        + '<div class="acts"><button type="submit">Save</button>'
+        + _post("/notify-test", t, "Send a test alert", cls="ghost")
+        + "</div></form>")
+
+    if panel.credentials.is_set:
+        parts.append(
+            '<h2>Panel password</h2><div class="card">'
+            f'<form method="post" action="/set-password">{_tok(t)}'
+            '<div class="fields">'
+            '<div><label for="np">New password</label>'
+            '<input id="np" type="password" name="password" '
+            'autocomplete="new-password"></div>'
+            '<div><label for="na">Repeat it</label>'
+            '<input id="na" type="password" name="again" '
+            'autocomplete="new-password"></div>'
+            '<button class="ghost" type="submit">Change</button>'
+            '</div></form>'
+            f'<div class="acts" style="margin-top:12px">'
+            f'<form method="post" action="/logout">{_tok(t)}'
+            '<button class="ghost" type="submit">Sign out</button>'
+            '</form></div></div>')
+    return _page("Settings - Net of Fees", "".join(parts))
 
 
 def render_health(panel: Panel, flash: tuple[str, bool] | None) -> bytes:
@@ -1046,7 +1184,20 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         self.panel.log.debug(fmt % args)
 
+    def _session(self) -> str | None:
+        return panel_auth.session_from(self.headers.get("Cookie"))
+
     def _authorised(self, supplied: str | None) -> bool:
+        """A valid session, or the token, or nothing required.
+
+        Three ways in, deliberately: a person logs in, a script passes
+        the token, and a panel with neither configured is one that only
+        localhost can reach anyway.
+        """
+        if self.panel.sessions.valid(self._session()):
+            return True
+        if self.panel.credentials.is_set:
+            return False      # a password is set, so a session is needed
         if self.panel.token is None:
             return True
         return bool(supplied) and secrets.compare_digest(
@@ -1106,14 +1257,24 @@ class Handler(BaseHTTPRequestHandler):
         elif "err" in query:
             flash = (query["err"][0], False)
 
+        path = parsed.path.rstrip("/") or "/"
+
         if not self._authorised(query.get("token", [None])[0]):
+            if self.panel.credentials.is_set:
+                return self._send(render_login(self.panel), 401)
+            if path == "/login":
+                # No password yet: offer to set one rather than refuse.
+                return self._send(render_login(self.panel, first_run=True))
             return self._deny("This panel needs the token from the link "
                               "printed when it started.")
 
-        path = parsed.path.rstrip("/") or "/"
+        if path == "/login":
+            return self._redirect("/")
         try:
             if path == "/":
                 return self._send(render_index(self.panel, flash))
+            if path == "/settings":
+                return self._send(render_settings(self.panel, flash))
             if path == "/health":
                 return self._send(render_health(self.panel, flash))
             if path == "/api/job":
@@ -1148,10 +1309,25 @@ class Handler(BaseHTTPRequestHandler):
         form = {k: v[0] for k, v in urllib.parse.parse_qs(
             self.rfile.read(length).decode("utf-8", "replace")).items()}
 
-        if not self._authorised(form.get("token")):
-            return self._deny("This action needs the token.")
         if not self._same_origin():
             return self._deny("Cross-site form posts are refused.")
+
+        path_now = parsed.path.strip("/")
+        if path_now == "login":
+            return self._do_login(form)
+        if path_now == "set-password":
+            return self._do_set_password(form)
+        if path_now == "logout":
+            self.panel.sessions.end(self._session())
+            self.send_response(303)
+            self.send_header("Location", "/")
+            self.send_header("Set-Cookie", panel_auth.clear_cookie())
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return None
+
+        if not self._authorised(form.get("token")):
+            return self._deny("This action needs the token.")
 
         path = parsed.path.strip("/")
         try:
@@ -1177,6 +1353,67 @@ class Handler(BaseHTTPRequestHandler):
                               str(exc), False)
         self.panel.log.info(message)
         self._back(episode_id, message, True)
+
+    def _do_login(self, form: dict):
+        if not self.panel.credentials.is_set:
+            return self._send(render_login(self.panel, first_run=True))
+        if not self.panel.credentials.check(form.get("password", "")):
+            locked = self.panel.credentials.locked_for
+            message = ("Too many attempts." if locked
+                       else "That password is not right.")
+            return self._send(render_login(self.panel, message), 401)
+        token = self.panel.sessions.start()
+        self.send_response(303)
+        self.send_header("Location", "/")
+        self.send_header("Set-Cookie", panel_auth.cookie_header(token))
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+        return None
+
+    def _do_set_password(self, form: dict):
+        """Only available while no password exists.
+
+        Changing one later goes through the settings page, which needs a
+        session -- otherwise anyone who reached the panel could replace
+        the password rather than guess it.
+        """
+        if self.panel.credentials.is_set and not self.panel.sessions.valid(
+                self._session()):
+            return self._deny("A password is already set. Sign in first.")
+        password = form.get("password", "")
+        if password != form.get("again", password):
+            return self._send(render_login(
+                self.panel, "Those did not match.", first_run=True), 400)
+        try:
+            self.panel.credentials.set_password(password)
+        except ValueError as exc:
+            return self._send(render_login(
+                self.panel, str(exc), first_run=True), 400)
+        token = self.panel.sessions.start()
+        self.panel.log.info("panel password set")
+        self.send_response(303)
+        self.send_header("Location", "/")
+        self.send_header("Set-Cookie", panel_auth.cookie_header(token))
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+        return None
+
+    def _connect_youtube(self, form: dict):
+        """Run Google's loopback OAuth for a channel.
+
+        Google permits a localhost redirect for installed apps, which is
+        what tools/youtube_auth.py already uses. Meta does not, which is
+        why Instagram pastes a token instead of connecting here.
+        """
+        channel = (form.get("channel") or "").strip().lower() or None
+        argv = ["--channel", channel] if channel else []
+        try:
+            note = self.panel.start_job(
+                channel or "youtube", ["connect", *argv],
+                "connect YouTube")
+        except PipelineError as exc:
+            note = str(exc)
+        return self._redirect(f"/settings{_q(self.panel.token, ok=note)}")
 
     def _act(self, episode_id: str, action: str, form: dict) -> str:
         panel = self.panel
@@ -1243,7 +1480,8 @@ def build(host: str, port: int, token: str | None,
     Refuses to bind beyond this machine without a token, because the panel
     can publish to a real channel.
     """
-    if host not in LOCAL_HOSTS and not token:
+    if host not in LOCAL_HOSTS and not token and not \
+            panel_auth.Credentials().is_set:
         raise PipelineError(
             f"refusing to serve on {host} without a token: this panel can "
             "publish to your channel. Pass --token to get an unguessable "

@@ -1,0 +1,121 @@
+"""Reading and writing `.env` from the panel.
+
+Credentials have always lived in `.env`, never in the repo and never in
+a manifest. The panel editing that file is the same thing as you editing
+it by hand, so this does not move a secret anywhere new.
+
+What it must never do is show one back. A field that renders its current
+value is a field that leaks it to a screenshot, a shoulder, or a browser
+that offered to remember it. So every secret reports only whether it is
+set, and writing a blank leaves the existing value alone.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+ENV_FILE = Path(".env")
+
+# Values that are never rendered back, only reported as set or not.
+SECRET = re.compile(
+    r"(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)$", re.IGNORECASE)
+
+# What the panel is allowed to write. An allowlist rather than anything
+# the form posts, so a crafted request cannot set PATH or LD_PRELOAD.
+EDITABLE = (
+    "ALERT_EMAIL", "SMTP_HOST", "SMTP_PORT", "SMTP_USER",
+    "SMTP_APP_PASSWORD", "SMTP_STARTTLS",
+    "IG_USER_ID", "IG_ACCESS_TOKEN", "IG_API_VERSION",
+    "PUBLISH_SLOTS", "CHANNEL_TZ", "BATCH_SIZE", "MAX_QUEUE_DAYS",
+    "VOICE", "VOICE_ENGINE", "VOICE_SPEED", "PROFILE",
+    "GEMINI_API_KEY", "SCRIPT_ENGINE", "TREND_REGION", "YOUTUBE_API_KEY",
+)
+
+_LINE = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=(.*)$")
+
+
+def is_secret(name: str) -> bool:
+    return bool(SECRET.search(name))
+
+
+def read(path: Path | None = None) -> dict[str, str]:
+    """Every value currently set, including commented-out ones as absent."""
+    path = path or ENV_FILE
+    if not path.exists():
+        return {}
+    values: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        match = _LINE.match(line)
+        if match:
+            values[match.group(1)] = match.group(2).strip()
+    return values
+
+
+def describe(path: Path | None = None) -> dict[str, dict]:
+    """What the settings page shows.
+
+    A secret reports `set` and nothing else; an ordinary value reports
+    itself, because seeing the current publishing slots is the point.
+    """
+    values = read(path)
+    out: dict[str, dict] = {}
+    for name in EDITABLE:
+        current = values.get(name, "")
+        out[name] = {
+            "secret": is_secret(name),
+            "set": bool(current),
+            "value": "" if is_secret(name) else current,
+        }
+    return out
+
+
+def write(changes: dict[str, str], path: Path | None = None) -> list[str]:
+    """Apply changes to `.env`, preserving comments and order.
+
+    A blank value for a secret means "leave it alone", because the form
+    never knew the old value to send back. A blank for anything else
+    clears it. Returns the names actually changed.
+    """
+    path = path or ENV_FILE
+    existing = read(path)
+    lines = (path.read_text(encoding="utf-8", errors="replace").splitlines()
+             if path.exists() else [])
+
+    applied: dict[str, str] = {}
+    for name, value in changes.items():
+        if name not in EDITABLE:
+            continue          # allowlist; a crafted post cannot add keys
+        value = value.strip()
+        if is_secret(name) and not value:
+            continue          # blank means unchanged, not cleared
+        if existing.get(name, "") == value:
+            continue
+        applied[name] = value
+    if not applied:
+        return []
+
+    seen: set[str] = set()
+    out: list[str] = []
+    for line in lines:
+        match = _LINE.match(line)
+        if match and match.group(1) in applied:
+            name = match.group(1)
+            out.append(f"{name}={applied[name]}")
+            seen.add(name)
+        else:
+            out.append(line)
+    for name, value in applied.items():
+        if name not in seen:
+            out.append(f"{name}={value}")
+
+    tmp = path.with_suffix(".env.tmp")
+    tmp.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
+    tmp.replace(path)
+    try:
+        path.chmod(0o600)   # it holds credentials
+    except OSError:
+        pass
+    return sorted(applied)
