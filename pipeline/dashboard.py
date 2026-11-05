@@ -812,7 +812,7 @@ SETTING_GROUPS = (
                 "the cap rather than start charging.",
      ("R2_ACCOUNT_ID", "R2_BUCKET", "R2_ACCESS_KEY_ID",
       "R2_SECRET_ACCESS_KEY", "R2_PUBLIC_BASE_URL",
-      "R2_STORAGE_CAP_GB")),
+      "R2_STORAGE_CAP_GB", "R2_RETAIN_DAYS")),
     ("Disk", "0 keeps everything. A video is only ever removed once it "
              "is published or archived \u2014 an unpublished one is the "
              "only copy of work you have not judged yet.",

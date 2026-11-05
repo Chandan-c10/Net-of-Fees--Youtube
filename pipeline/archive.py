@@ -54,6 +54,13 @@ DEFAULT_REGION = "auto"
 # paying for when the local copy and YouTube both still have it.
 DEFAULT_CAP_GB = 9.5
 
+# How long an archived episode is kept. The cap stops the bucket
+# growing; this stops it filling in the first place. A week is the
+# default because the thing the archive protects against -- a cloud
+# render's artifact expiring after seven days -- is over by then, and
+# by that point the episode is either published or abandoned.
+DEFAULT_RETAIN_DAYS = 7
+
 # Listing costs a Class B operation, of which there are 10 million free
 # a month. Cached for a run so a batch does not list once per episode.
 _USAGE_CACHE: dict[str, tuple[float, int]] = {}
@@ -188,6 +195,141 @@ def budget(incoming: int, target: Target | None = None) -> dict:
         "incoming": incoming,
         "free": max(0, limit - used),
         "percent": round(100 * used / limit, 1) if limit else 0.0,
+    }
+
+
+def retain_days() -> float:
+    """How long to keep an archived object. 0 keeps everything."""
+    raw = os.getenv("R2_RETAIN_DAYS", str(DEFAULT_RETAIN_DAYS)).strip()
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return DEFAULT_RETAIN_DAYS
+
+
+def _list_objects(target: Target) -> list[tuple[str, int, str]]:
+    """Every object as (key, bytes, last-modified)."""
+    import xml.etree.ElementTree as ET
+
+    out: list[tuple[str, int, str]] = []
+    token = None
+    while True:
+        query = {"list-type": "2", "max-keys": "1000"}
+        if token:
+            query["continuation-token"] = token
+        url, headers = signed_get(target, "", query=query)
+        request = urllib.request.Request(url, headers=headers, method="GET")
+        try:
+            with urllib.request.urlopen(request, timeout=TIMEOUT_SEC) as resp:
+                body = resp.read()
+        except urllib.error.HTTPError as exc:
+            raise StageError(f"could not list the bucket: {exc.code}") from exc
+        except urllib.error.URLError as exc:
+            raise StageError(f"could not reach the bucket: {exc.reason}"
+                             ) from exc
+
+        root = ET.fromstring(body)
+        token = None
+        for element in root.iter():
+            tag = element.tag.rsplit("}", 1)[-1]
+            if tag == "Contents":
+                fields = {child.tag.rsplit("}", 1)[-1]: (child.text or "")
+                          for child in element}
+                out.append((fields.get("Key", ""),
+                            int(fields.get("Size") or 0),
+                            fields.get("LastModified", "")))
+            elif tag == "NextContinuationToken" and element.text:
+                token = element.text
+        if not token:
+            return out
+
+
+def signed_delete(target: Target, key: str,
+                  now: dt.datetime | None = None
+                  ) -> tuple[str, dict[str, str]]:
+    """A signed DELETE for one object."""
+    now = now or dt.datetime.now(dt.UTC)
+    amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+    stamp = now.strftime("%Y%m%d")
+    host = urllib.parse.urlparse(target.endpoint).netloc
+    empty = hashlib.sha256(b"").hexdigest()
+    path = f"/{target.bucket}/{urllib.parse.quote(key)}"
+
+    canonical_headers = (f"host:{host}\n"
+                         f"x-amz-content-sha256:{empty}\n"
+                         f"x-amz-date:{amz_date}\n")
+    signed = "host;x-amz-content-sha256;x-amz-date"
+    canonical = "\n".join(["DELETE", path, "", canonical_headers,
+                            signed, empty])
+    scope = f"{stamp}/{target.region}/{SERVICE}/aws4_request"
+    to_sign = "\n".join([ALGORITHM, amz_date, scope,
+                          hashlib.sha256(canonical.encode()).hexdigest()])
+    signature = hmac.new(_signing_key(target.secret, stamp, target.region),
+                         to_sign.encode(), hashlib.sha256).hexdigest()
+    return f"{target.endpoint}{path}", {
+        "x-amz-content-sha256": empty,
+        "x-amz-date": amz_date,
+        "Authorization": (f"{ALGORITHM} Credential={target.key_id}/{scope}, "
+                          f"SignedHeaders={signed}, Signature={signature}"),
+    }
+
+
+def _age_days(last_modified: str) -> float | None:
+    if not last_modified:
+        return None
+    try:
+        when = dt.datetime.fromisoformat(last_modified.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return (dt.datetime.now(dt.UTC) - when).total_seconds() / 86400
+
+
+def expire(target: Target | None = None, dry_run: bool = False,
+           days: float | None = None) -> dict:
+    """Delete archived objects past their retention.
+
+    The cap stops the bucket growing; this stops it filling. Age is the
+    only criterion, which is safe here because the archive is a third
+    copy -- the local file and the published video both predate it.
+    """
+    log = get(None, "archive")
+    target = target or Target()
+    if not target.configured:
+        return {"enabled": False, "note": "archive storage is not configured"}
+    keep = retain_days() if days is None else days
+    if not keep:
+        return {"enabled": False, "note": "R2_RETAIN_DAYS is 0; nothing expires"}
+
+    removed, freed, kept = [], 0, 0
+    for key, size, modified in _list_objects(target):
+        age = _age_days(modified)
+        if age is None or age < keep:
+            kept += 1
+            continue
+        if not dry_run:
+            url, headers = signed_delete(target, key)
+            request = urllib.request.Request(url, headers=headers,
+                                             method="DELETE")
+            try:
+                urllib.request.urlopen(request, timeout=TIMEOUT_SEC)
+            except urllib.error.HTTPError as exc:
+                log.warning(f"could not delete {key}: {exc.code}")
+                continue
+            except urllib.error.URLError as exc:
+                log.warning(f"could not delete {key}: {exc.reason}")
+                continue
+        removed.append({"key": key, "mb": round(size / 1e6, 2),
+                        "age_days": round(age, 1)})
+        freed += size
+
+    _USAGE_CACHE.clear()
+    if removed and not dry_run:
+        log.info(f"expired {len(removed)} objects, freeing "
+                 f"{freed / 1e6:.0f} MB")
+    return {
+        "enabled": True, "dry_run": dry_run, "retain_days": keep,
+        "removed": removed, "kept": kept,
+        "freed_mb": round(freed / 1e6, 1),
     }
 
 

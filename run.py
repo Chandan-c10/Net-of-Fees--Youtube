@@ -403,6 +403,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("notify-test",
                    help="send a test failure alert").set_defaults(func=cmd_notify_test)
 
+    ar = sub.add_parser("archive", help="report or expire cloud storage")
+    ar.add_argument("--prune", action="store_true",
+                    help="delete objects past R2_RETAIN_DAYS")
+    ar.add_argument("--dry-run", action="store_true")
+    ar.add_argument("-v", "--verbose", action="store_true")
+    ar.set_defaults(func=cmd_archive)
+
     ck = sub.add_parser("check", help="inspect a rendered episode")
     ck.add_argument("id")
     ck.add_argument("-v", "--verbose", action="store_true")
@@ -563,6 +570,41 @@ def cmd_connect(args) -> int:
     proc = subprocess.run([_sys.executable, str(tool), *argv],
                           timeout=600, check=False)
     return proc.returncode
+
+
+def cmd_archive(args) -> int:
+    """Report the archive bucket, or expire what is past retention."""
+    from pipeline import archive
+    logging_setup.configure(None, args.verbose)
+    target = archive.Target()
+    if not target.configured:
+        print("\n  archive storage is not configured: "
+              + ", ".join(target.missing()) + "\n")
+        return 0
+    if args.prune:
+        result = archive.expire(target, dry_run=args.dry_run)
+        if not result["enabled"]:
+            print(f"\n  {result['note']}\n")
+            return 0
+        verb = "would free" if args.dry_run else "freed"
+        print(f"\n  {verb} {result['freed_mb']} MB from "
+              f"{len(result['removed'])} objects past "
+              f"{result['retain_days']:g} days; {result['kept']} kept\n")
+        for row in result["removed"][:20]:
+            print(f"    {row['key']:48} {row['mb']:7} MB  "
+                  f"{row['age_days']:.0f}d")
+        print()
+        return 0
+    plan = archive.budget(0, target)
+    if not plan["capped"]:
+        print(f"\n  {archive.bucket_usage(target) / 1e9:.2f} GB "
+              "stored, no cap set\n")
+        return 0
+    print(f"\n  {plan['used'] / 1e9:.2f} GB of "
+          f"{plan['limit'] / 1e9:.2f} GB ({plan['percent']:.0f}%), "
+          f"{plan['free'] / 1e9:.2f} GB free")
+    print(f"  objects expire after {archive.retain_days():g} days\n")
+    return 0
 
 
 def cmd_check(args) -> int:
@@ -756,7 +798,7 @@ def main(argv: list[str] | None = None) -> int:
     # `run.py 001 ...` is the common path; route it without a subcommand.
     if argv and not argv[0].startswith("-") and argv[0] not in {
         "new", "list", "status", "doctor", "voices", "notify-test",
-        "dashboard", "trends", "health", "publish-due", "batch", "connect", "prune", "check"
+        "dashboard", "trends", "health", "publish-due", "batch", "connect", "prune", "check", "archive"
     }:
         rp = argparse.ArgumentParser(prog="run.py <id>")
         rp.add_argument("id")

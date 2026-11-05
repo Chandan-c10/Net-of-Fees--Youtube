@@ -352,3 +352,50 @@ def test_a_listing_is_signed_with_its_query(configured):
         configured, "", query={"list-type": "2", "max-keys": "1000"})
     assert "list-type=2" in url and "max-keys=1000" in url
     assert headers["Authorization"].startswith("AWS4-HMAC-SHA256")
+
+
+# ---- expiry -----------------------------------------------------------
+
+
+def test_the_default_retention_covers_the_artifact_window():
+    """Seven days is how long a cloud render's artifact lasts, which is
+    what the archive exists to outlive."""
+    assert archive.DEFAULT_RETAIN_DAYS == 7
+
+
+def test_retention_can_be_changed_or_turned_off(monkeypatch):
+    monkeypatch.setenv("R2_RETAIN_DAYS", "30")
+    assert archive.retain_days() == 30
+    monkeypatch.setenv("R2_RETAIN_DAYS", "0")
+    assert archive.retain_days() == 0
+
+
+def test_nothing_expires_when_retention_is_off(monkeypatch, configured):
+    monkeypatch.setenv("R2_RETAIN_DAYS", "0")
+    assert archive.expire(configured)["enabled"] is False
+
+
+def test_expiry_needs_configuration(monkeypatch):
+    for k in KEYS:
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.delenv("R2_ENDPOINT", raising=False)
+    assert archive.expire()["enabled"] is False
+
+
+def test_a_delete_is_signed_and_carries_no_secret(configured):
+    url, headers = archive.signed_delete(configured, "episodes/1/video.mp4")
+    assert "secret-example" not in str(headers) and "secret-example" not in url
+    assert headers["Authorization"].startswith("AWS4-HMAC-SHA256")
+    assert url.endswith("/videos/episodes/1/video.mp4")
+
+
+@pytest.mark.parametrize("modified,older", [
+    ("2020-01-01T00:00:00.000Z", True),
+    ("", None),
+])
+def test_object_age_is_read_from_the_listing(modified, older):
+    age = archive._age_days(modified)
+    if older is None:
+        assert age is None
+    else:
+        assert age and age > 365
