@@ -66,7 +66,8 @@ def _headlines(data: dict) -> list[tuple[str, str]]:
 
 
 def _render(focal: str, support: str, out: Path, style,
-            series: str = "") -> Path:
+            series: str = "", episode: int | None = None,
+            episode_name: str = "") -> Path:
     """One template per profile, so the channel is recognisable in a feed.
 
     Consistency beats novelty here: a viewer scrolling their subscriptions
@@ -102,6 +103,32 @@ def _render(focal: str, support: str, out: Path, style,
         d.text((box[0] + pad, (box[1] + box[3]) / 2), series.upper(),
                font=badge, fill=style.BACKGROUND, anchor="lm")
 
+        # The episode number sits beside the series badge, not inside it:
+        # a viewer deciding whether they have seen this one is looking for
+        # a number, and it has to survive being 168 pixels wide.
+        if episode:
+            label = f"EP {episode}"
+            num_font = _font(int(h * 0.058))
+            nx = box[2] + pad
+            nw = d.textlength(label, font=num_font)
+            nbox = [nx, box[1], int(nx + nw + pad * 2), box[3]]
+            d.rounded_rectangle(nbox, radius=int(h * 0.016),
+                                outline=style.ACCENT, width=max(2, h // 300))
+            d.text((nbox[0] + pad, (nbox[1] + nbox[3]) / 2), label,
+                   font=num_font, fill=style.ACCENT, anchor="lm")
+
+    # The episode's own name, under the supporting line. Small, because
+    # the focal number is what carries the frame -- but present, so a
+    # series reads as a series rather than a run of similar images.
+    if episode_name:
+        name_font = _font(int(h * 0.052))
+        trimmed = episode_name
+        while trimmed and d.textlength(trimmed.upper(), font=name_font) > w * 0.8:
+            trimmed = trimmed.rsplit(" ", 1)[0]
+        if trimmed:
+            d.text((w * 0.09, h * 0.795), trimmed.upper(), font=name_font,
+                   fill=style.INK_DIM, anchor="lm")
+
     d.text((w * 0.09, h * 0.88), style.CHANNEL, font=_font(int(h * 0.05)),
            fill=style.INK_DIM, anchor="lm")
 
@@ -128,7 +155,8 @@ def run(ep: Episode, m: Manifest, profile) -> list[Path]:
 
     made: list[Path] = []
     for i, (focal, support) in enumerate(_headlines(data), start=1):
-        p = _render(focal, support, ep.thumbnail(i), style, m.series)
+        p = _render(focal, support, ep.thumbnail(i), style,
+                    m.series, m.series_episode, m.title)
         legible = check_small_legibility(p)
         if not legible:
             log.info(f"thumb_{i} has weak contrast at {MIN_PREVIEW[0]}x{MIN_PREVIEW[1]}")

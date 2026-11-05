@@ -18,7 +18,24 @@ import argparse
 import sys
 from pathlib import Path
 
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+# Playlists need a wider scope than uploading. youtube.upload can insert
+# a video and nothing else; adding it to a playlist is a write against
+# the channel, which needs the full youtube scope. That widening is
+# visible on the OAuth consent screen and in the API audit, so it is
+# opt-in: set YOUTUBE_PLAYLISTS=1 before authorising, and leave it off if
+# you would rather request the narrower scope.
+UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+PLAYLIST_SCOPE = "https://www.googleapis.com/auth/youtube"
+
+
+def wanted_scopes() -> list[str]:
+    import os
+    if os.getenv("YOUTUBE_PLAYLISTS", "").strip() in ("1", "true", "yes"):
+        return [UPLOAD_SCOPE, PLAYLIST_SCOPE]
+    return [UPLOAD_SCOPE]
+
+
+SCOPES = wanted_scopes()
 ROOT = Path(__file__).resolve().parent.parent
 CLIENT_SECRET = ROOT / "secrets" / "client_secret.json"
 

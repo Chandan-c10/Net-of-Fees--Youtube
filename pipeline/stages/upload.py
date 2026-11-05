@@ -25,7 +25,24 @@ from ..manifest import Episode, Manifest
 QUOTA_COST_PER_UPLOAD = 1600
 DAILY_QUOTA = 10_000
 
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+# Playlists need a wider scope than uploading. youtube.upload can insert
+# a video and nothing else; adding it to a playlist is a write against
+# the channel, which needs the full youtube scope. That widening is
+# visible on the OAuth consent screen and in the API audit, so it is
+# opt-in: set YOUTUBE_PLAYLISTS=1 before authorising, and leave it off if
+# you would rather request the narrower scope.
+UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+PLAYLIST_SCOPE = "https://www.googleapis.com/auth/youtube"
+
+
+def wanted_scopes() -> list[str]:
+    import os
+    if os.getenv("YOUTUBE_PLAYLISTS", "").strip() in ("1", "true", "yes"):
+        return [UPLOAD_SCOPE, PLAYLIST_SCOPE]
+    return [UPLOAD_SCOPE]
+
+
+SCOPES = wanted_scopes()
 
 DISCLAIMER = (
     "Educational content only. Not investment advice. I am not a "
@@ -227,6 +244,72 @@ def _client(channel: str = "default"):
     return build("youtube", "v3", credentials=creds, cache_discovery=False)
 
 
+def playlist_title(m: Manifest) -> str | None:
+    """The playlist this episode belongs in, if any.
+
+    A series is the playlist. An episode with no series does not get one,
+    because a playlist of unrelated videos helps nobody.
+    """
+    return m.series or None
+
+
+def _find_playlist(youtube, title: str):
+    """An existing playlist with this title, or None.
+
+    Matched on title rather than a stored id: the id would be one more
+    thing to keep in sync, and a channel does not have fifty playlists.
+    """
+    page = None
+    while True:
+        resp = youtube.playlists().list(
+            part="id,snippet", mine=True, maxResults=50,
+            pageToken=page).execute()
+        for item in resp.get("items", []):
+            if item["snippet"]["title"].strip().lower() == title.strip().lower():
+                return item["id"]
+        page = resp.get("nextPageToken")
+        if not page:
+            return None
+
+
+def add_to_playlist(youtube, m: Manifest, video_id: str, log) -> str | None:
+    """Put this video in its series playlist, making it if needed.
+
+    Runs after the upload succeeded, and never raises: the video is
+    already live, and failing here would make a published episode look
+    like a failed one.
+    """
+    title = playlist_title(m)
+    if not title:
+        log.debug("no series; no playlist")
+        return None
+    try:
+        playlist_id = _find_playlist(youtube, title)
+        if not playlist_id:
+            created = youtube.playlists().insert(
+                part="snippet,status",
+                body={
+                    "snippet": {"title": title,
+                                "description": f"Episodes of {title}."},
+                    "status": {"privacyStatus": "public"},
+                },
+            ).execute()
+            playlist_id = created["id"]
+            log.info(f"created the playlist {title!r}")
+        youtube.playlistItems().insert(
+            part="snippet",
+            body={"snippet": {
+                "playlistId": playlist_id,
+                "resourceId": {"kind": "youtube#video", "videoId": video_id},
+            }},
+        ).execute()
+        log.info(f"added to the playlist {title!r}")
+        return playlist_id
+    except Exception as exc:  # the video is already live
+        log.warning(f"could not add to the playlist: {exc}")
+        return None
+
+
 def _set_thumbnail(youtube, ep: Episode, m: Manifest, video_id: str, log) -> None:
     """Attach the thumbnail the operator chose at Gate 2.
 
@@ -335,8 +418,10 @@ def run(ep: Episode, m: Manifest, dry_run: bool = False,
 
     video_id = response["id"]
     _set_thumbnail(youtube, ep, m, video_id, log)
+    playlist_id = add_to_playlist(youtube, m, video_id, log)
     row.update(status="posted", external_id=video_id, posted_at=_now())
     m.published_at = row["posted_at"]
     m.mark_done("upload", video_id=video_id, privacy=privacy,
-                tags=len(tags), channel=channel)
+                tags=len(tags), channel=channel,
+                playlist_id=playlist_id)
     log.info(f"published {video_id} ({privacy})")
