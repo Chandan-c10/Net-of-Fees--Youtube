@@ -468,6 +468,9 @@ def build_parser() -> argparse.ArgumentParser:
                       help="127.0.0.1 (default) needs no token; anything "
                            "else requires one")
     dash.add_argument("--port", type=int, default=8765)
+    dash.add_argument("--tailscale", action="store_true",
+                      help="serve on this machine's Tailscale address, so "
+                           "your own devices can reach it and nothing else")
     dash.add_argument("--token", nargs="?", const="", default=None,
                       help="--token alone generates one; or pass a value")
     dash.add_argument("-v", "--verbose", action="store_true")
@@ -487,7 +490,23 @@ def cmd_dashboard(args) -> int:
     token = args.token or dashboard.token_from_env()
     if args.token == "":          # --token with no value: generate one
         token = dashboard.new_token()
-    dashboard.serve(host=args.host, port=args.port, token=token)
+
+    host = args.host
+    if args.tailscale:
+        host = dashboard.tailnet_address()
+        if not host:
+            print("\n  No Tailscale address found on this machine.")
+            print("  Install it from https://tailscale.com/download, sign")
+            print("  in, then run this again.\n")
+            return 1
+        from pipeline import panel_auth
+        if not token and not panel_auth.Credentials().is_set:
+            # A tailnet is private, but the panel can publish, so it is
+            # not served unprotected on any address but this machine's.
+            token = dashboard.new_token()
+            print("\n  No panel password set, so a token was generated.")
+            print("  Set a password from Settings to use a login instead.")
+    dashboard.serve(host=host, port=args.port, token=token)
     return 0
 
 

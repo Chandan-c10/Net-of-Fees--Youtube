@@ -347,3 +347,46 @@ def test_an_unknown_action_is_refused(server):
     base, _, _ = server
     status, _ = post(base, "/episode/777/nosuchaction", {})
     assert status in (303, 404)
+
+
+# ---- reaching it from a phone -----------------------------------------
+
+
+def test_a_tailnet_address_is_recognised(monkeypatch):
+    """Tailscale hands out 100.64.0.0/10, which is what makes the
+    address recognisable without asking the daemon."""
+    import subprocess
+
+    def fake_run(*a, **k):
+        class R:
+            stdout = "100.101.102.103\n"
+        return R()
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert dashboard.tailnet_address() == "100.101.102.103"
+
+
+def test_no_tailscale_reports_none(monkeypatch):
+    import socket
+    import subprocess
+
+    def fake_run(*a, **k):
+        raise OSError("not installed")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(socket, "getaddrinfo",
+                        lambda *a, **k: [(2, 1, 6, "", ("192.168.1.5", 0))])
+    assert dashboard.tailnet_address() is None
+
+
+def test_a_tailnet_bind_is_still_protected():
+    """A tailnet is private to your devices, but the panel can publish,
+    so it is protected like any other non-local address."""
+    with pytest.raises(PipelineError, match="without a token"):
+        dashboard.build("100.101.102.103", 0, None)
+
+
+def test_a_tailnet_bind_with_a_token_passes_the_guard():
+    """Only the guard is asserted: the address cannot actually be bound
+    on a machine that is not on that tailnet."""
+    with pytest.raises(OSError):
+        # Past the token check, it fails on the socket instead.
+        dashboard.build("100.101.102.103", 0, "tok")

@@ -1541,6 +1541,41 @@ class Handler(BaseHTTPRequestHandler):
             f"{'dry run' if dry else 'publish'} to {where}")
 
 
+def tailnet_address() -> str | None:
+    """This machine's Tailscale address, if it is on a tailnet.
+
+    Binding to it specifically is the point: 0.0.0.0 would also expose
+    the panel to whatever wifi the laptop is on, and a cafe network is
+    not a place to serve something that can publish to your channel.
+    A tailnet address is reachable only by your own devices.
+    """
+    import socket
+
+    # Tailscale hands out 100.64.0.0/10 (CGNAT space), which is what
+    # makes the address recognisable without asking the daemon.
+    try:
+        import subprocess
+        proc = subprocess.run(["tailscale", "ip", "-4"],
+                              capture_output=True, text=True, timeout=10,
+                              check=False)
+        candidate = proc.stdout.strip().splitlines()
+        if candidate and candidate[0].startswith("100."):
+            return candidate[0].strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    # No CLI, so look for the interface directly.
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None,
+                                       socket.AF_INET):
+            address = info[4][0]
+            if address.startswith("100."):
+                return address
+    except socket.gaierror:
+        pass
+    return None
+
+
 def build(host: str, port: int, token: str | None,
           episodes_dir: Path | None = None) -> tuple[ThreadingHTTPServer, str]:
     """Create the server. Returns it with the URL to open.
@@ -1548,6 +1583,9 @@ def build(host: str, port: int, token: str | None,
     Refuses to bind beyond this machine without a token, because the panel
     can publish to a real channel.
     """
+    # A tailnet address is private to your own devices, but the panel
+    # can still publish, so it is protected like any other non-local
+    # bind rather than treated as safe because the network is.
     if host not in LOCAL_HOSTS and not token and not \
             panel_auth.Credentials().is_set:
         raise PipelineError(
