@@ -48,6 +48,17 @@ SERVICE = "s3"
 # R2 ignores the region but requires one in the signature.
 DEFAULT_REGION = "auto"
 
+# R2 gives 10 GB free and then bills $0.015 per GB per month without
+# asking. The default stops short of that, because a storage bill is a
+# bad way to find out an archive grew -- and nothing here is worth
+# paying for when the local copy and YouTube both still have it.
+DEFAULT_CAP_GB = 9.5
+
+# Listing costs a Class B operation, of which there are 10 million free
+# a month. Cached for a run so a batch does not list once per episode.
+_USAGE_CACHE: dict[str, tuple[float, int]] = {}
+CACHE_SECONDS = 300
+
 
 class Target:
     """Where archives go, assembled from the environment."""
@@ -88,6 +99,96 @@ class Target:
         if self.public_base:
             return f"{self.public_base}/{urllib.parse.quote(key)}"
         return f"{self.endpoint}/{self.bucket}/{urllib.parse.quote(key)}"
+
+
+def cap_bytes() -> int:
+    """The ceiling, in bytes. Zero disables the check."""
+    raw = os.getenv("R2_STORAGE_CAP_GB", str(DEFAULT_CAP_GB)).strip()
+    try:
+        gigabytes = max(0.0, float(raw))
+    except ValueError:
+        gigabytes = DEFAULT_CAP_GB
+    return int(gigabytes * 1_000_000_000)
+
+
+def _list_page(target: Target, token: str | None) -> tuple[list[int], str | None]:
+    """One page of object sizes, and the continuation token."""
+    import xml.etree.ElementTree as ET
+
+    query = {"list-type": "2", "max-keys": "1000"}
+    if token:
+        query["continuation-token"] = token
+    url, headers = signed_get(target, "", query=query)
+    request = urllib.request.Request(url, headers=headers, method="GET")
+    with urllib.request.urlopen(request, timeout=TIMEOUT_SEC) as resp:
+        body = resp.read()
+
+    # The namespace is on every element, so it is stripped rather than
+    # matched -- S3 implementations differ on which URI they declare.
+    root = ET.fromstring(body)
+    sizes, following = [], None
+    for element in root.iter():
+        tag = element.tag.rsplit("}", 1)[-1]
+        if tag == "Size" and element.text:
+            sizes.append(int(element.text))
+        elif tag == "NextContinuationToken" and element.text:
+            following = element.text
+    return sizes, following
+
+
+def bucket_usage(target: Target | None = None,
+                 use_cache: bool = True) -> int:
+    """Total bytes stored. Raises if it cannot be determined.
+
+    Deliberately not guessed at: a cap enforced against an unknown
+    figure is not a cap.
+    """
+    import time
+    target = target or Target()
+    if not target.configured:
+        raise ConfigError("archive storage is not configured")
+
+    key = f"{target.endpoint}/{target.bucket}"
+    if use_cache and key in _USAGE_CACHE:
+        when, value = _USAGE_CACHE[key]
+        if time.time() - when < CACHE_SECONDS:
+            return value
+
+    total, token = 0, None
+    while True:
+        try:
+            sizes, token = _list_page(target, token)
+        except urllib.error.HTTPError as exc:
+            raise StageError(
+                f"could not list the bucket to check its size: {exc.code}"
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise StageError(
+                f"could not reach the bucket: {exc.reason}") from exc
+        total += sum(sizes)
+        if not token:
+            break
+    _USAGE_CACHE[key] = (time.time(), total)
+    return total
+
+
+def budget(incoming: int, target: Target | None = None) -> dict:
+    """Whether storing `incoming` more bytes stays inside the cap."""
+    target = target or Target()
+    limit = cap_bytes()
+    if not limit:
+        return {"capped": False, "allowed": True, "used": 0, "limit": 0}
+    used = bucket_usage(target)
+    allowed = used + incoming <= limit
+    return {
+        "capped": True,
+        "allowed": allowed,
+        "used": used,
+        "limit": limit,
+        "incoming": incoming,
+        "free": max(0, limit - used),
+        "percent": round(100 * used / limit, 1) if limit else 0.0,
+    }
 
 
 def _sign(key: bytes, message: str) -> bytes:
@@ -147,7 +248,9 @@ def signed_headers(target: Target, key: str, payload: bytes,
 
 
 def signed_get(target: Target, key: str,
-               now: dt.datetime | None = None) -> tuple[str, dict[str, str]]:
+               now: dt.datetime | None = None,
+               query: dict[str, str] | None = None
+               ) -> tuple[str, dict[str, str]]:
     """A signed GET for a private object.
 
     Lets the bucket stay private. A voice reference served from a public
@@ -159,13 +262,19 @@ def signed_get(target: Target, key: str,
     stamp = now.strftime("%Y%m%d")
     host = urllib.parse.urlparse(target.endpoint).netloc
     empty = hashlib.sha256(b"").hexdigest()
-    path = f"/{target.bucket}/{urllib.parse.quote(key)}"
+    path = f"/{target.bucket}/{urllib.parse.quote(key)}" if key else \
+        f"/{target.bucket}"
+    # Query parameters are signed, and must be in sorted order.
+    canonical_query = "&".join(
+        f"{urllib.parse.quote(k, safe='')}={urllib.parse.quote(v, safe='')}"
+        for k, v in sorted((query or {}).items()))
 
     canonical_headers = (f"host:{host}\n"
                          f"x-amz-content-sha256:{empty}\n"
                          f"x-amz-date:{amz_date}\n")
     signed = "host;x-amz-content-sha256;x-amz-date"
-    canonical = "\n".join(["GET", path, "", canonical_headers, signed, empty])
+    canonical = "\n".join(
+        ["GET", path, canonical_query, canonical_headers, signed, empty])
 
     scope = f"{stamp}/{target.region}/{SERVICE}/aws4_request"
     to_sign = "\n".join([ALGORITHM, amz_date, scope,
@@ -178,7 +287,8 @@ def signed_get(target: Target, key: str,
         "Authorization": (f"{ALGORITHM} Credential={target.key_id}/{scope}, "
                           f"SignedHeaders={signed}, Signature={signature}"),
     }
-    return f"{target.endpoint}{path}", headers
+    suffix = f"?{canonical_query}" if canonical_query else ""
+    return f"{target.endpoint}{path}{suffix}", headers
 
 
 def key_for(episode_id: str, name: str) -> str:
@@ -202,6 +312,19 @@ def put(path: Path, key: str, target: Target | None = None,
         raise StageError(
             f"{path.name} is {size / 1e9:.1f} GB, over the single-request "
             "limit; multipart upload is not implemented"
+        )
+
+    # The cap is checked before the bytes go, not after. R2 bills past
+    # 10 GB without asking, and a storage bill is a poor way to learn
+    # that an archive grew.
+    plan = budget(size, target)
+    if plan["capped"] and not plan["allowed"]:
+        raise StageError(
+            f"refusing to archive {path.name}: the bucket holds "
+            f"{plan['used'] / 1e9:.2f} GB of a {plan['limit'] / 1e9:.2f} GB "
+            f"cap and this would pass it. Free space with "
+            f"`run.py archive --prune`, raise R2_STORAGE_CAP_GB, or set it "
+            f"to 0 to stop checking. The video is still on disk."
         )
 
     payload = path.read_bytes()
@@ -243,7 +366,26 @@ def archive_episode(ep, m, log=None) -> str | None:
         url = put(ep.video, key_for(m.id, "video.mp4"), target)
     except (ConfigError, StageError) as exc:
         log.warning(f"could not archive: {exc}")
+        # A cap refusal is worth a mail: it means archiving has silently
+        # stopped, and the operator would otherwise find out when they
+        # went looking for a file that was never stored.
+        if "cap" in str(exc):
+            try:
+                from . import notify
+                notify.failure(m.id, "archive", exc)
+            except Exception:
+                pass
         return None
+
+    # Warn while there is still room to act.
+    try:
+        plan = budget(0, target)
+        if plan["capped"] and plan["percent"] >= 80:
+            log.warning(
+                f"the archive bucket is {plan['percent']:.0f}% full "
+                f"({plan['used'] / 1e9:.2f} of {plan['limit'] / 1e9:.2f} GB)")
+    except (ConfigError, StageError):
+        pass
     m.stage("assemble").data["archive_url"] = url
     log.info(f"archived to {url}")
     return url

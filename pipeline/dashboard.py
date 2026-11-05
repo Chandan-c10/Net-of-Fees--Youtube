@@ -807,9 +807,12 @@ SETTING_GROUPS = (
                   "rather than connected here.",
      ("IG_USER_ID", "IG_ACCESS_TOKEN")),
     ("Storage", "Optional. A cloud render\u2019s artifact is deleted after "
-                "seven days; this keeps a copy that is not.",
+                "seven days; this keeps a copy that is not. R2 gives 10 GB "
+                "free and bills past it without asking, so uploads stop at "
+                "the cap rather than start charging.",
      ("R2_ACCOUNT_ID", "R2_BUCKET", "R2_ACCESS_KEY_ID",
-      "R2_SECRET_ACCESS_KEY", "R2_PUBLIC_BASE_URL")),
+      "R2_SECRET_ACCESS_KEY", "R2_PUBLIC_BASE_URL",
+      "R2_STORAGE_CAP_GB")),
     ("Disk", "0 keeps everything. A video is only ever removed once it "
              "is published or archived \u2014 an unpublished one is the "
              "only copy of work you have not judged yet.",
