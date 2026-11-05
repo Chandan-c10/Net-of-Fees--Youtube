@@ -796,6 +796,13 @@ SETTING_GROUPS = (
     ("Instagram", "Meta requires an HTTPS redirect, so the token is pasted "
                   "rather than connected here.",
      ("IG_USER_ID", "IG_ACCESS_TOKEN")),
+    ("Storage", "Optional. A cloud render\u2019s artifact is deleted after "
+                "seven days; this keeps a copy that is not.",
+     ("R2_ACCOUNT_ID", "R2_BUCKET", "R2_ACCESS_KEY_ID",
+      "R2_SECRET_ACCESS_KEY", "R2_PUBLIC_BASE_URL")),
+    ("Voice reference", "Where your recordings live if not on this machine. "
+                        "This link is a credential: it can clone your voice.",
+     ("VOICE_REFERENCE_URL",)),
     ("Content", "Defaults for new episodes and the trend scan.",
      ("PROFILE", "SCRIPT_ENGINE", "GEMINI_API_KEY", "YOUTUBE_API_KEY",
       "TREND_REGION")),
@@ -867,6 +874,7 @@ def render_settings(panel: Panel, flash: tuple[str, bool] | None) -> bytes:
         + "".join(form_parts)
         + '<div class="acts"><button type="submit">Save</button>'
         + _post("/notify-test", t, "Send a test alert", cls="ghost")
+        + _post("/storage-test", t, "Test storage", cls="ghost")
         + "</div></form>")
 
     if panel.credentials.is_set:

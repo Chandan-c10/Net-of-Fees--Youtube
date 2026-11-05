@@ -114,6 +114,10 @@ def _run_stage(name: str, ep: Episode, m: Manifest, settings, args) -> None:
                          dissolve=not args.no_dissolve,
                          music=not args.no_music)
         finish.run(ep, m, look_name=args.look)
+        # Insurance, not a step: unconfigured does nothing, and a failed
+        # upload is logged rather than raised. The video is on disk.
+        from pipeline import archive
+        archive.archive_episode(ep, m)
     elif name == "metadata":
         metadata.run(ep, m, profile)
     elif name == "thumbnail":

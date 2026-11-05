@@ -167,3 +167,42 @@ def test_discard_removes_only_audio(tmp_path):
     fetch.discard(tmp_path)
     assert not (tmp_path / "take.wav").exists()
     assert (tmp_path / "meta.json").exists(), "only the recording goes"
+
+
+# ---- from a private bucket --------------------------------------------
+
+
+def test_a_bucket_key_is_preferred_to_a_url(monkeypatch):
+    """A private object needs no link that could leak."""
+    monkeypatch.setenv("VOICE_REFERENCE_KEY", "voices/chandan.zip")
+    assert fetch.object_key("chandan_en") == "voices/chandan.zip"
+
+
+def test_a_per_voice_key_wins(monkeypatch):
+    monkeypatch.setenv("VOICE_REFERENCE_KEY", "general.zip")
+    monkeypatch.setenv("VOICE_REFERENCE_KEY_CHANDAN_EN", "mine.zip")
+    assert fetch.object_key("chandan_en") == "mine.zip"
+
+
+def test_a_key_without_storage_configured_says_so(monkeypatch, tmp_path):
+    monkeypatch.setenv("VOICE_REFERENCE_KEY", "voices/chandan.zip")
+    for name in ("R2_ACCOUNT_ID", "R2_ENDPOINT", "R2_BUCKET",
+                 "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(ConfigError, match="archive storage is not configured"):
+        fetch.fetch("chandan_en", tmp_path)
+
+
+def test_a_signed_get_carries_no_secret(monkeypatch):
+    import datetime as dt
+
+    from pipeline import archive
+    for k, v in (("R2_ACCOUNT_ID", "a"), ("R2_BUCKET", "b"),
+                 ("R2_ACCESS_KEY_ID", "AKIA"), ("R2_SECRET_ACCESS_KEY", "shh")):
+        monkeypatch.setenv(k, v)
+    url, headers = archive.signed_get(
+        archive.Target(), "voices/x.zip",
+        dt.datetime(2026, 11, 5, tzinfo=dt.UTC))
+    assert "shh" not in str(headers) and "shh" not in url
+    assert headers["Authorization"].startswith("AWS4-HMAC-SHA256")
+    assert url.endswith("/b/voices/x.zip")

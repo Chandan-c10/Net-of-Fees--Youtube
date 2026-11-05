@@ -18,8 +18,12 @@ from pathlib import Path
 ENV_FILE = Path(".env")
 
 # Values that are never rendered back, only reported as set or not.
+# KEY_ID is here because R2_ACCESS_KEY_ID ends in _ID and so fell
+# outside an end-anchored match on KEY -- which would have rendered an
+# access key back into the page. The public half of a key pair is still
+# a credential.
 SECRET = re.compile(
-    r"(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)$", re.IGNORECASE)
+    r"(KEY|KEY_ID|TOKEN|SECRET|PASSWORD|CREDENTIAL)$", re.IGNORECASE)
 
 # What the panel is allowed to write. An allowlist rather than anything
 # the form posts, so a crafted request cannot set PATH or LD_PRELOAD.
@@ -30,12 +34,24 @@ EDITABLE = (
     "PUBLISH_SLOTS", "CHANNEL_TZ", "BATCH_SIZE", "MAX_QUEUE_DAYS",
     "VOICE", "VOICE_ENGINE", "VOICE_SPEED", "PROFILE",
     "GEMINI_API_KEY", "SCRIPT_ENGINE", "TREND_REGION", "YOUTUBE_API_KEY",
+    "R2_ACCOUNT_ID", "R2_BUCKET", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
+    "R2_ENDPOINT", "R2_PUBLIC_BASE_URL", "R2_REGION",
+    "VOICE_REFERENCE_URL",
 )
 
 _LINE = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=(.*)$")
 
 
+# Names a suffix cannot classify. A voice reference URL is a credential
+# -- anyone holding it can clone the speaker -- and nothing about the
+# word "URL" says so.
+ALWAYS_SECRET = frozenset({"VOICE_REFERENCE_URL", "IG_VIDEO_URL"})
+
+
 def is_secret(name: str) -> bool:
+    upper = name.upper()
+    if upper in ALWAYS_SECRET or upper.startswith("VOICE_REFERENCE_URL"):
+        return True
     return bool(SECRET.search(name))
 
 

@@ -79,9 +79,22 @@ def reference_url(voice: str) -> str | None:
             or os.getenv("VOICE_REFERENCE_URL") or None)
 
 
-def _download(url: str, out: Path, log) -> Path:
+def object_key(voice: str) -> str | None:
+    """A key in the archive bucket, if the reference lives there.
+
+    Preferred over a URL: the bucket stays private and the credentials
+    already configured for archiving are used to read it, so there is no
+    link that can clone your voice if it leaks.
+    """
+    key = re.sub(r"[^A-Za-z0-9]", "_", voice).upper()
+    return (os.getenv(f"VOICE_REFERENCE_KEY_{key}")
+            or os.getenv("VOICE_REFERENCE_KEY") or None)
+
+
+def _download(url: str, out: Path, log,
+              headers: dict[str, str] | None = None) -> Path:
     request = urllib.request.Request(
-        url, headers={"User-Agent": "net-of-fees/1.0"})
+        url, headers={"User-Agent": "net-of-fees/1.0", **(headers or {})})
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_SEC) as resp:
             declared = int(resp.headers.get("Content-Length") or 0)
@@ -127,9 +140,21 @@ def fetch(voice: str, into: Path, url: str | None = None,
     is refused rather than guessed at.
     """
     log = get(None, "voice-fetch")
-    url = url or reference_url(voice)
-    if not url:
-        return []
+    # A private object in the archive bucket is preferred to a URL.
+    key = None if url else object_key(voice)
+    if key:
+        from .. import archive
+        target = archive.Target()
+        if not target.configured:
+            raise ConfigError(
+                f"VOICE_REFERENCE_KEY is set for {voice!r} but the archive "
+                "storage is not configured: "
+                + ", ".join(target.missing()) + " not set"
+            )
+    else:
+        url = url or reference_url(voice)
+        if not url:
+            return []
 
     into.mkdir(parents=True, exist_ok=True)
     existing = sorted(p for p in into.iterdir()
@@ -140,7 +165,14 @@ def fetch(voice: str, into: Path, url: str | None = None,
 
     work = Path(tempfile.mkdtemp(prefix="voiceref-"))
     try:
-        blob = _download(direct_url(url), work / "reference.bin", log)
+        if key:
+            from .. import archive
+            signed_url, headers = archive.signed_get(archive.Target(), key)
+            blob = _download(signed_url, work / "reference.bin", log, headers)
+            source_name = key
+        else:
+            blob = _download(direct_url(url), work / "reference.bin", log)
+            source_name = url
         if _looks_like_html(blob):
             raise StageError(
                 "the URL returned a web page rather than audio. For Drive, "
@@ -151,19 +183,21 @@ def fetch(voice: str, into: Path, url: str | None = None,
 
         landed: list[Path] = []
         if zipfile.is_zipfile(blob):
-            with zipfile.ZipFile(blob) as archive:
-                for member in archive.namelist():
+            # Not named `archive`: that is the storage module, imported
+            # in this same function for the signed-GET path.
+            with zipfile.ZipFile(blob) as bundle:
+                for member in bundle.namelist():
                     name = Path(member).name
                     if not name or Path(member).suffix.lower() not in AUDIO_SUFFIXES:
                         continue
                     # Flattened by name: a zip entry must not choose where
                     # it lands on disk.
                     target = into / name
-                    with archive.open(member) as src, target.open("wb") as dst:
+                    with bundle.open(member) as src, target.open("wb") as dst:
                         shutil.copyfileobj(src, dst, 1 << 20)
                     landed.append(target)
         else:
-            suffix = Path(urllib.parse.urlparse(url).path).suffix.lower()
+            suffix = Path(urllib.parse.urlparse(source_name).path).suffix.lower()
             if suffix not in AUDIO_SUFFIXES:
                 suffix = ".wav"
             target = into / f"reference{suffix}"
