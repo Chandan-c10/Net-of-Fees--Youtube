@@ -50,7 +50,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import config, gates, panel_auth, platform_support, prune, settings_store
+from . import archive, config, gates, panel_auth, platform_support, prune, settings_store
 from .errors import GateError, PipelineError
 from .logging_setup import get
 from .manifest import STAGES, Episode, Manifest
@@ -197,6 +197,7 @@ class Panel:
             "gate_2_blockers": gates.gate_2_blockers(m),
             "chosen_thumbnail": m.chosen_thumbnail,
             "publish_mode": m.publish_mode,
+            "keep_files": m.keep_files,
             "publish_after": m.publish_after,
             "draft_voice": bool(m.stage("voice").data.get("draft")),
             "scrub_findings": m.stage("scrub").data.get("findings", 0),
@@ -224,6 +225,15 @@ class Panel:
                 when = (m.publish_after or "")[:16].replace("T", " ")
                 message += f" Will publish at {when}."
             return message
+
+    def set_keep(self, episode_id: str, keep: bool) -> str:
+        """Exempt this episode from retention, or stop exempting it."""
+        with self.lock:
+            ep, m = self.load(episode_id)
+            m.keep_files = keep
+            ep.save_manifest(m)
+            return ("This episode is kept whole." if keep
+                    else "This episode follows the retention settings.")
 
     def set_publish_mode(self, episode_id: str, mode: str) -> str:
         """How this episode leaves once approved.
@@ -1154,6 +1164,11 @@ def _publish_block(episode_id: str, s: dict, token: str | None,
     chooser = f"""<div class="card"><h3>After approval</h3>
   <p class="n">Approving is always yours. This only decides whether a
   second press is needed afterwards.</p>
+  <div class="acts" style="margin-bottom:12px">{_post(f"/episode/{episode_id}/keep", token,
+        "Stop keeping this one" if s.get("keep_files")
+        else "Keep this episode whole",
+        fields=f'<input type="hidden" name="on" value="{"0" if s.get("keep_files") else "1"}">',
+        cls="ghost small")}</div>
   <form method="post" action="/episode/{episode_id}/publish-mode">
     {_tok(token)}<div class="fields">
       <div><label for="mode">When approved</label>
@@ -1363,6 +1378,32 @@ class Handler(BaseHTTPRequestHandler):
                 ok, detail = notify.test_channel()
                 return self._redirect(
                     f"/health{_q(self.panel.token, **{('ok' if ok else 'err'): detail})}")
+            if path == "settings":
+                changed = settings_store.write(form)
+                note = (f"Saved: {', '.join(changed)}." if changed
+                        else "Nothing changed.")
+                return self._redirect(
+                    f"/settings{_q(self.panel.token, ok=note)}")
+            if path == "storage-test":
+                ok, detail = archive.test_target()
+                key = "ok" if ok else "err"
+                return self._redirect(
+                    f"/settings{_q(self.panel.token, **{key: detail})}")
+            if path == "prune":
+                dry = form.get("dry") == "1"
+                result = prune.sweep(self.panel.episodes_dir, dry_run=dry)
+                if not result["enabled"]:
+                    note = result["note"]
+                else:
+                    verb = "would free" if dry else "freed"
+                    note = (f"{verb} {result['freed_mb']} MB from "
+                            f"{len(result['episodes'])} episodes")
+                    if result["kept"]:
+                        note += f"; {len(result['kept'])} kept"
+                return self._redirect(
+                    f"/settings{_q(self.panel.token, ok=note)}")
+            if path == "connect-youtube":
+                return self._connect_youtube(form)
 
             parts = path.split("/")
             if len(parts) != 3 or parts[0] != "episode":
@@ -1445,6 +1486,8 @@ class Handler(BaseHTTPRequestHandler):
             message = panel.approve(episode_id, 2)
             started = panel.drain_auto_publish()
             return f"{message} {started}" if started else message
+        if action == "keep":
+            return panel.set_keep(episode_id, form.get("on") == "1")
         if action == "publish-mode":
             return panel.set_publish_mode(episode_id,
                                           form.get("mode", "manual"))

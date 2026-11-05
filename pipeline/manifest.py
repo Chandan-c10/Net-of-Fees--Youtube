@@ -103,6 +103,9 @@ class Manifest:
     # afterwards. gates.py independently refuses to clear a gate during a
     # scheduled run, so a timer can post what you approved and can never
     # approve anything itself.
+    # Opt this episode out of retention. A global setting cannot
+    # say "keep this one whole", and sometimes that is the point.
+    keep_files: bool = False
     publish_mode: str = "manual"
     publish_after: str | None = None
     platform_posts: list[dict[str, Any]] = field(default_factory=list)

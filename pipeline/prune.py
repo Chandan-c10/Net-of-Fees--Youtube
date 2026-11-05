@@ -42,18 +42,30 @@ KEEP_ALWAYS = ("manifest.json", "script.md", "metadata.json", "cues.json",
                "captions.srt", "run.log")
 
 
-def _days(name: str, fallback: int) -> int:
+def _days(name: str, fallback: float) -> float:
+    """A retention period in days.
+
+    Float rather than int so shorter periods are expressible: 0.5 is
+    twelve hours, 0.25 is six. Days is the unit because that is how the
+    setting reads, not because a day is the smallest useful interval.
+    """
+    raw = os.getenv(name, str(fallback)).strip()
+    if raw.lower().endswith("h"):          # "6h" is friendlier than 0.25
+        try:
+            return max(0.0, float(raw[:-1]) / 24.0)
+        except ValueError:
+            return fallback
     try:
-        return max(0, int(os.getenv(name, str(fallback))))
+        return max(0.0, float(raw))
     except ValueError:
         return fallback
 
 
-def working_days() -> int:
+def working_days() -> float:
     return _days("RETAIN_WORKING_DAYS", DEFAULT_WORKING_DAYS)
 
 
-def video_days() -> int:
+def video_days() -> float:
     return _days("RETAIN_VIDEO_DAYS", DEFAULT_VIDEO_DAYS)
 
 
@@ -103,8 +115,20 @@ def safe_to_remove_video(m) -> tuple[bool, str]:
     return False, "not published or archived"
 
 
+def is_exempt(m) -> bool:
+    """Whether this episode opts out of retention entirely.
+
+    One episode is often worth keeping whole -- the first one, or the
+    one being used to debug something -- and a global setting cannot
+    express that.
+    """
+    return bool(getattr(m, "keep_files", False))
+
+
 def plan_for(ep, m, now: datetime | None = None) -> Plan:
     """What could be removed from this episode right now."""
+    if is_exempt(m):
+        return Plan(m.id, [], None, 0, "kept by request")
     keep_working = working_days()
     keep_video = video_days()
     working: list[Path] = []
