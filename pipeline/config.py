@@ -19,9 +19,50 @@ VOICES_DIR = ROOT / "voices"
 
 # All timestamps are stored UTC. Slot times are expressed in this zone and
 # converted on write -- architecture doc, section 24.
-CHANNEL_TZ = ZoneInfo("Asia/Kolkata")
-MORNING_SLOT = (8, 30)
-EVENING_SLOT = (19, 30)
+CHANNEL_TZ = ZoneInfo(os.getenv("CHANNEL_TZ", "Asia/Kolkata"))
+
+
+def _parse_slots(raw: str) -> tuple[tuple[int, int], ...]:
+    """Publishing times, as "HH:MM,HH:MM".
+
+    Settable rather than fixed: two a day at 08:30 and 19:30 suits one
+    channel and nothing else, and the number of slots is also the number
+    of episodes a day the queue will release.
+    """
+    slots: list[tuple[int, int]] = []
+    for piece in raw.split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        try:
+            hour, minute = (int(part) for part in piece.split(":"))
+        except ValueError as exc:
+            raise ValueError(
+                f"bad slot {piece!r} in PUBLISH_SLOTS; expected HH:MM"
+            ) from exc
+        if not (0 <= hour < 24 and 0 <= minute < 60):
+            raise ValueError(f"slot {piece!r} is not a real time")
+        slots.append((hour, minute))
+    if not slots:
+        raise ValueError("PUBLISH_SLOTS is empty; at least one is needed")
+    return tuple(sorted(set(slots)))
+
+
+PUBLISH_SLOTS = _parse_slots(os.getenv("PUBLISH_SLOTS", "08:30,19:30"))
+
+# Kept for anything that still names them individually.
+MORNING_SLOT = PUBLISH_SLOTS[0]
+EVENING_SLOT = PUBLISH_SLOTS[-1]
+
+# How many episodes a batch produces in one go. Drafting several at once
+# and releasing them on the slots is the point of the queue: the work
+# happens when you have time, the posting happens on schedule.
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "10"))
+
+# Refuse to queue more than this far ahead. A queue longer than a
+# fortnight is one whose early episodes were written about a different
+# week.
+MAX_QUEUE_DAYS = int(os.getenv("MAX_QUEUE_DAYS", "14"))
 
 
 @dataclass(frozen=True)

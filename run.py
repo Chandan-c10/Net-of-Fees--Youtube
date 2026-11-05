@@ -399,6 +399,21 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("notify-test",
                    help="send a test failure alert").set_defaults(func=cmd_notify_test)
 
+    ba = sub.add_parser("batch", help="draft several episodes at once")
+    ba.add_argument("--count", type=int,
+                    help=f"default {config.BATCH_SIZE} (BATCH_SIZE)")
+    ba.add_argument("--profile")
+    ba.add_argument("--recipe", default="fee_drag")
+    ba.add_argument("--script-engine", default="template",
+                    dest="script_engine")
+    ba.add_argument("--publish-mode", default="at_slot",
+                    choices=("manual", "on_approval", "at_slot"),
+                    dest="publish_mode")
+    ba.add_argument("--keep-going", action="store_true",
+                    help="carry on past a failed episode")
+    ba.add_argument("-v", "--verbose", action="store_true")
+    ba.set_defaults(func=cmd_batch)
+
     pd = sub.add_parser("publish-due",
                         help="publish approved episodes whose slot arrived")
     pd.add_argument("--dry-run", action="store_true")
@@ -516,6 +531,67 @@ def cmd_health(args) -> int:
     return 1 if open_now else 0
 
 
+def cmd_batch(args) -> int:
+    """Draft several episodes and give each a release time.
+
+    The point of a queue: the work happens when you have time, the
+    posting happens on schedule. Each episode is drafted to Gate 1 and
+    stops there -- a batch creates work to review, never work that
+    publishes itself.
+    """
+    from pipeline import schedule
+    logging_setup.configure(None, args.verbose)
+    settings = config.load()
+    profile = args.profile or settings.profile
+    profiles.load(profile)
+
+    count = args.count or config.BATCH_SIZE
+    try:
+        releases = schedule.plan_releases(count)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+
+    mode = args.publish_mode
+    print(f"\n  Drafting {count} episodes for {profile}, "
+          f"releasing {len(config.PUBLISH_SLOTS)} a day\n")
+
+    made = 0
+    for when in releases:
+        episode_id = f"{when:%Y%m%d}-{when:%H%M}"
+        ep = _episode(episode_id)
+        if ep.manifest_path.exists():
+            print(f"    {episode_id}  exists, skipped")
+            continue
+        try:
+            ep.ensure_dirs()
+            m = Manifest.new(episode_id, recipe=args.recipe,
+                             profile=profile, voice=settings.voice)
+            m.publish_mode = mode
+            m.publish_after = when.isoformat()
+            log = logging_setup.get(episode_id, "batch")
+            export.run(ep, m, {})
+            ep.save_manifest(m)
+            script_gen.run(ep, m, engine=args.script_engine,
+                           profile=profiles.load(profile))
+            from pipeline.scrub import assert_clean
+            assert_clean([ep.snapshot, ep.script])
+            m.mark_done("scrub", findings=0)
+            ep.save_manifest(m)
+            made += 1
+            print(f"    {episode_id}  drafted, releases {when:%a %d %b %H:%M}")
+            log.info("drafted in a batch")
+        except PipelineError as exc:
+            print(f"    {episode_id}  FAILED: {exc}")
+            if not args.keep_going:
+                raise
+        if made >= count:
+            break
+
+    print(f"\n  {made} drafted. Each stops at Gate 1 until you approve it.")
+    print("  Review them:  python run.py dashboard\n")
+    return 0
+
+
 def cmd_publish_due(args) -> int:
     """Publish every approved episode whose slot has arrived.
 
@@ -600,7 +676,7 @@ def main(argv: list[str] | None = None) -> int:
     # `run.py 001 ...` is the common path; route it without a subcommand.
     if argv and not argv[0].startswith("-") and argv[0] not in {
         "new", "list", "status", "doctor", "voices", "notify-test",
-        "dashboard", "trends", "health", "publish-due"
+        "dashboard", "trends", "health", "publish-due", "batch"
     }:
         rp = argparse.ArgumentParser(prog="run.py <id>")
         rp.add_argument("id")

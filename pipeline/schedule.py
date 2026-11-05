@@ -15,14 +15,14 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from .config import CHANNEL_TZ, EVENING_SLOT, MORNING_SLOT
+from .config import CHANNEL_TZ, MAX_QUEUE_DAYS, PUBLISH_SLOTS
 
 
 def slots_for(day: datetime) -> list[datetime]:
     """The publishing times on a given day, in channel time."""
     return [
         day.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        for hour, minute in (MORNING_SLOT, EVENING_SLOT)
+        for hour, minute in PUBLISH_SLOTS
     ]
 
 
@@ -73,4 +73,29 @@ def due_episodes(manifests) -> list:
         if m.publish_mode == "at_slot" and not is_due(m.publish_after):
             continue
         out.append(m)
+    return out
+
+
+def plan_releases(count: int, start: datetime | None = None) -> list[datetime]:
+    """One release time per episode, filling the slots in order.
+
+    Two slots a day means two episodes a day; changing PUBLISH_SLOTS
+    changes both. Refuses to run past MAX_QUEUE_DAYS, because a queue
+    longer than that was written about a different week.
+    """
+    if count < 1:
+        raise ValueError(f"cannot plan {count} releases")
+    now = (start or datetime.now(CHANNEL_TZ)).astimezone(CHANNEL_TZ)
+    out: list[datetime] = []
+    day = now
+    while len(out) < count:
+        for slot in slots_for(day):
+            if slot > now and len(out) < count:
+                out.append(slot)
+        day += timedelta(days=1)
+        if (day - now).days > MAX_QUEUE_DAYS:
+            raise ValueError(
+                f"{count} episodes would run past {MAX_QUEUE_DAYS} days at "
+                f"{len(slots_for(now))} a day. Add slots or queue fewer."
+            )
     return out
