@@ -50,7 +50,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import config, gates, panel_auth, platform_support, settings_store
+from . import config, gates, panel_auth, platform_support, prune, settings_store
 from .errors import GateError, PipelineError
 from .logging_setup import get
 from .manifest import STAGES, Episode, Manifest
@@ -800,6 +800,10 @@ SETTING_GROUPS = (
                 "seven days; this keeps a copy that is not.",
      ("R2_ACCOUNT_ID", "R2_BUCKET", "R2_ACCESS_KEY_ID",
       "R2_SECRET_ACCESS_KEY", "R2_PUBLIC_BASE_URL")),
+    ("Disk", "0 keeps everything. A video is only ever removed once it "
+             "is published or archived \u2014 an unpublished one is the "
+             "only copy of work you have not judged yet.",
+     ("RETAIN_WORKING_DAYS", "RETAIN_VIDEO_DAYS")),
     ("Voice reference", "Where your recordings live if not on this machine. "
                         "This link is a credential: it can clone your voice.",
      ("VOICE_REFERENCE_URL",)),
@@ -830,6 +834,13 @@ def render_settings(panel: Panel, flash: tuple[str, bool] | None) -> bytes:
              'never shown back; leave a field blank to keep it.</p>']
     if flash:
         parts.append(_flash(flash))
+
+    disk = prune.usage(panel.episodes_dir)
+    parts.append(
+        f'<div class="card"><h3>Disk</h3><p class="n">'
+        f'{disk["episodes"]} episodes using {disk["mb"]} MB. '
+        f'Working files are reproducible; a video is not until it is '
+        f'published or archived.</p></div>')
 
     rows = []
     for key, info in channels.items():
@@ -875,6 +886,9 @@ def render_settings(panel: Panel, flash: tuple[str, bool] | None) -> bytes:
         + '<div class="acts"><button type="submit">Save</button>'
         + _post("/notify-test", t, "Send a test alert", cls="ghost")
         + _post("/storage-test", t, "Test storage", cls="ghost")
+        + _post("/prune", t, "Preview a cleanup",
+                fields='<input type="hidden" name="dry" value="1">',
+                cls="ghost")
         + "</div></form>")
 
     if panel.credentials.is_set:

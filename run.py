@@ -403,6 +403,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("notify-test",
                    help="send a test failure alert").set_defaults(func=cmd_notify_test)
 
+    pr = sub.add_parser("prune", help="free disk from finished episodes")
+    pr.add_argument("--dry-run", action="store_true")
+    pr.add_argument("-v", "--verbose", action="store_true")
+    pr.set_defaults(func=cmd_prune)
+
     cn = sub.add_parser("connect", help="authorise a YouTube channel")
     cn.add_argument("--channel", help="for a second channel")
     cn.set_defaults(func=cmd_connect)
@@ -555,6 +560,27 @@ def cmd_connect(args) -> int:
     return proc.returncode
 
 
+def cmd_prune(args) -> int:
+    """Remove working files, and videos that are safely elsewhere."""
+    from pipeline import prune
+    logging_setup.configure(None, args.verbose)
+    result = prune.sweep(config.EPISODES_DIR, dry_run=args.dry_run)
+    if not result["enabled"]:
+        print(f"\n  {result['note']}\n")
+        return 0
+    verb = "would free" if args.dry_run else "freed"
+    print(f"\n  {verb} {result['freed_mb']} MB from "
+          f"{len(result['episodes'])} episodes\n")
+    for row in result["episodes"]:
+        what = ", ".join(row["working"]) or "-"
+        print(f"    {row['episode']:14} {row['mb']:7} MB  {what}"
+              f"{'  + video' if row['video'] else ''}")
+    for row in result["kept"]:
+        print(f"    {row['episode']:14} kept: {row['why']}")
+    print()
+    return 0
+
+
 def cmd_batch(args) -> int:
     """Draft several episodes and give each a release time.
 
@@ -700,7 +726,7 @@ def main(argv: list[str] | None = None) -> int:
     # `run.py 001 ...` is the common path; route it without a subcommand.
     if argv and not argv[0].startswith("-") and argv[0] not in {
         "new", "list", "status", "doctor", "voices", "notify-test",
-        "dashboard", "trends", "health", "publish-due", "batch", "connect"
+        "dashboard", "trends", "health", "publish-due", "batch", "connect", "prune"
     }:
         rp = argparse.ArgumentParser(prog="run.py <id>")
         rp.add_argument("id")
