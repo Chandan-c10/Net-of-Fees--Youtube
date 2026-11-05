@@ -403,6 +403,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("notify-test",
                    help="send a test failure alert").set_defaults(func=cmd_notify_test)
 
+    ck = sub.add_parser("check", help="inspect a rendered episode")
+    ck.add_argument("id")
+    ck.add_argument("-v", "--verbose", action="store_true")
+    ck.set_defaults(func=cmd_check)
+
     pr = sub.add_parser("prune", help="free disk from finished episodes")
     pr.add_argument("--dry-run", action="store_true")
     pr.add_argument("-v", "--verbose", action="store_true")
@@ -558,6 +563,31 @@ def cmd_connect(args) -> int:
     proc = subprocess.run([_sys.executable, str(tool), *argv],
                           timeout=600, check=False)
     return proc.returncode
+
+
+def cmd_check(args) -> int:
+    """Inspect a rendered episode the way a viewer would."""
+    from pipeline import checks
+    ep = _episode(args.id)
+    if not ep.manifest_path.exists():
+        print(f"no episode {args.id}", file=sys.stderr)
+        return 1
+    m = ep.load_manifest()
+    logging_setup.configure(ep.log, args.verbose)
+    profile = profiles.load(m.profile)
+    vertical = not profile.visuals.supports("16:9")
+    result = checks.inspect(ep, m, vertical=vertical)
+    print()
+    if result["clean"]:
+        print("    nothing wrong\n")
+        return 0
+    for finding in result["findings"]:
+        mark = "BLOCKER" if finding["severity"] == "blocker" else "warning"
+        print(f"    {mark:8} {finding['where']:10} {finding['message']}")
+        print(f"             fix: {finding['fix']}")
+    print(f"\n    {result['blockers']} blocking, "
+          f"{result['warnings']} worth a look\n")
+    return 1 if result["blockers"] else 0
 
 
 def cmd_prune(args) -> int:
@@ -726,7 +756,7 @@ def main(argv: list[str] | None = None) -> int:
     # `run.py 001 ...` is the common path; route it without a subcommand.
     if argv and not argv[0].startswith("-") and argv[0] not in {
         "new", "list", "status", "doctor", "voices", "notify-test",
-        "dashboard", "trends", "health", "publish-due", "batch", "connect", "prune"
+        "dashboard", "trends", "health", "publish-due", "batch", "connect", "prune", "check"
     }:
         rp = argparse.ArgumentParser(prog="run.py <id>")
         rp.add_argument("id")

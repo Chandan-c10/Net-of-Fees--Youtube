@@ -81,13 +81,13 @@ class FakeYouTube:
     def playlistItems(self):
         outer = self
 
-        class I:
+        class Items:
             def insert(self, part, body):
                 outer.added.append(
                     (body["snippet"]["playlistId"],
                      body["snippet"]["resourceId"]["videoId"]))
                 return _Exec({})
-        return I()
+        return Items()
 
 
 class _Exec:

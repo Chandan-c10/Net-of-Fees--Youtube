@@ -63,6 +63,13 @@ class Scene:
     index: int
     text: str
     visual_spec: dict[str, Any] = field(default_factory=dict)
+    # What this scene should show, written when the script is written.
+    #
+    # The picture used to be chosen after the fact, which is how a
+    # monkey ended up on screen during a line about a boy. Deciding it
+    # with the words means the frame can never drift from what is being
+    # said -- and it is the prompt an image generator needs anyway.
+    image_prompt: str = ""
     duration_sec: float | None = None
     voice: str | None = None  # overrides the profile default when set
     flagged: bool = False

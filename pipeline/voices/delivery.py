@@ -238,3 +238,20 @@ def describe(text: str, scene_index: int = 0, episode_id: str = "") -> dict:
         "speed_max": round(max(speeds), 3) if speeds else 0.0,
         "pause_total_sec": round(sum(b.pause_sec for b in beats), 3),
     }
+
+
+def scene_speed(beats: list[Beat]) -> float:
+    """One speed for a whole scene, from what the scene contains.
+
+    The per-beat speeds exist to emphasise; averaging them keeps the
+    direction of that emphasis -- a scene full of numbers still slows --
+    without splitting the line into separately synthesised fragments,
+    which is what made the read choppy.
+    """
+    if not beats:
+        return BASE_SPEED
+    # Weighted by length, so a long clause counts for more than a
+    # three-word aside.
+    total = sum(max(1, len(b.text)) for b in beats)
+    return round(
+        sum(b.speed * max(1, len(b.text)) for b in beats) / total, 4)

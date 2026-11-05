@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from itertools import pairwise
 
 import pytest
 from conftest import needs_ffmpeg
@@ -156,7 +157,7 @@ def test_the_camera_does_not_repeat_across_scenes(episode_with_pictures):
     motion_assemble.run(ep, m, spec=spec, music=False, ambient=False)
     moves = m.stage("assemble").data["moves"]
     assert len(moves) == 4
-    assert not any(a == b for a, b in zip(moves, moves[1:])), moves
+    assert not any(a == b for a, b in pairwise(moves)), moves
 
 
 # ---- captions ---------------------------------------------------------

@@ -66,8 +66,54 @@ def run(ep: Episode, m: Manifest, engine_name: str = "silent",
     return
 
 
+def _narrate_continuously(ep: Episode, m: Manifest, engine, lexicons,
+                          log) -> bool:
+    """One take for the whole script, with the lines timed inside it.
+
+    Returns False when the engine cannot do it, so the caller falls back
+    to per-scene narration rather than failing.
+    """
+    from ..voices import continuous
+    if not hasattr(engine, "render_text"):
+        return False
+
+    spoken = []
+    for scene in m.scenes:
+        voice = scene.voice or m.voice
+        spoken.append(apply_lexicon(scene.text, lexicons.get(voice, {})))
+
+    class _Lines:
+        def __init__(self, texts):
+            self.items = [type("L", (), {"text": t})() for t in texts]
+
+    spans = continuous.narrate(
+        engine, _Lines(spoken).items, ep.final_audio, m.id, log)
+
+    for scene, span in zip(m.scenes, spans, strict=True):
+        scene.duration_sec = round(span.duration, 3)
+    total = sum(s.duration_sec for s in m.scenes)
+    m.mark_done("voice", engine=engine.name, draft=False,
+                total_sec=round(total, 3), take="continuous",
+                scenes=len(m.scenes))
+    log.info(f"continuous take, {total:.2f}s across {len(m.scenes)} scenes")
+    return True
+
+
 def _narrate(ep: Episode, m: Manifest, engine, voices_used, log) -> None:
     lexicons = {v: load_lexicon(VOICES_DIR / v) for v in voices_used}
+
+    # One take by default. Per-scene narration pauses at every boundary
+    # while the frame changes, which is the opposite of how narration
+    # works -- the read runs on and the pictures cut underneath it.
+    if (os.getenv("VOICE_TAKE", "continuous").strip() != "per_scene"
+            and len(voices_used) == 1
+            and not getattr(engine, "draft", False)):
+        try:
+            if _narrate_continuously(ep, m, engine, lexicons, log):
+                return
+        except Exception as exc:
+            log.warning(f"continuous take failed ({exc}); narrating per scene")
+
     total = 0.0
     for scene in m.scenes:
         voice = scene.voice or m.voice

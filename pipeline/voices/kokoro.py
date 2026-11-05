@@ -45,7 +45,13 @@ KNOWN_VOICES: dict[str, str] = {
     "hm_psi":      "Hindi male, alternative",
 }
 
+# Per-scene narration pads every boundary with a pause, so the speech
+# itself has to run faster to keep the overall pace up. A continuous
+# take has no such padding, and the same 1.4 reads at 265 words a
+# minute, which is unintelligible. Measured: 1.05 gives 152 wpm in one
+# take, against 150-160 for ordinary speech.
 DEFAULT_SPEED = 1.4
+CONTINUOUS_SPEED = 1.05
 DEFAULT_VOICE = "am_michael"
 SAMPLE_RATE = 24000  # Kokoro's native rate
 
@@ -100,11 +106,16 @@ class KokoroVoice:
         # Kokoro at 1.0 reads at about 123 words a minute, against
         # 150-160 for ordinary speech. Measured on a real render, not
         # assumed. VOICE_SPEED overrides it.
+        self._explicit_speed = speed
         self.speed = speed if speed is not None else float(
             os.getenv("VOICE_SPEED", DEFAULT_SPEED))
         # The first letter of the voice name selects the language pack.
         self.lang_code = lang_code or voice[0]
         self.episode_id = episode_id
+        # Flow by default. VOICE_EXPRESSIVE=1 brings back per-sentence
+        # speed control at the cost of a choppier read.
+        self.expressive = os.getenv("VOICE_EXPRESSIVE", "").strip() in (
+            "1", "true", "yes")
         self._pipeline = None
         self._scene = 0
 
@@ -142,6 +153,27 @@ class KokoroVoice:
         self._pipeline = KPipeline(lang_code=self.lang_code)
         return self._pipeline
 
+    def continuous_speed(self) -> float:
+        """The speed for a one-take read.
+
+        Slower than the per-scene default, because that default was
+        compensating for pauses a continuous take does not have.
+        """
+        if self._explicit_speed is not None:
+            return self._explicit_speed
+        return float(os.getenv("VOICE_SPEED_CONTINUOUS",
+                               os.getenv("VOICE_SPEED", CONTINUOUS_SPEED)))
+
+    def render_text(self, text: str, speed: float | None = None):
+        """Raw samples for any text, at this voice's speed.
+
+        The seam continuous.py renders a whole script through. It uses
+        the continuous speed unless the caller names one.
+        """
+        if speed is None:
+            speed = self.continuous_speed()
+        return self._render_beat(self._get_pipeline(), text, speed)
+
     def _render_beat(self, pipeline, text: str, speed: float):
         """One beat at its own speed."""
         import numpy as np
@@ -161,16 +193,28 @@ class KokoroVoice:
         import numpy as np
         import soundfile as sf
 
-        # Beat by beat rather than a paragraph at a time: the pauses then
-        # land where a person would breathe, and the beat carrying the
-        # number can slow down for it. See delivery.py.
         beats = delivery.plan(text, self._scene, self.episode_id)
         if not beats:
             raise StageError(f"nothing to narrate in scene {self._scene}")
         seed = f"{self.episode_id}:{self._scene}"
-        segments = [self._render_beat(pipeline, b.text, b.speed * self.speed)
-                    for b in beats]
-        samples = delivery.stitch(segments, beats, seed, SAMPLE_RATE)
+
+        if self.expressive and len(beats) > 1:
+            # Per-beat synthesis buys emphasis and costs flow: each
+            # fragment gets its own intonation arc and ends on a falling
+            # tone, so three sentences read as three closed statements
+            # rather than one thought. Kept for scenes that want the
+            # emphasis, but not the default.
+            segments = [self._render_beat(pipeline, b.text,
+                                          b.speed * self.speed)
+                        for b in beats]
+            samples = delivery.stitch(segments, beats, seed, SAMPLE_RATE)
+        else:
+            # The whole scene as one utterance, so the model carries a
+            # single contour across it. The scene's own speed still
+            # varies -- derived from its content, not fixed -- which
+            # keeps some of the emphasis without breaking the line.
+            samples = self._render_beat(
+                pipeline, text, delivery.scene_speed(beats) * self.speed)
 
         # Pause is baked into this scene's file so the measured duration
         # includes it, keeping the timing contract in section 5a intact.

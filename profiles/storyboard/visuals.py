@@ -13,6 +13,7 @@ by real pictures as they arrive.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -110,6 +111,43 @@ def fallback_card(text: str, spec: VideoSpec, out: Path,
     return out
 
 
+def matching_source(sources: Path, scene) -> Path | None:
+    """The picture this scene asked for.
+
+    `scene.image_prompt` is written with the script, so a scene names
+    what it should show rather than taking whatever sat at its index.
+    A named file wins; otherwise the words in the prompt are matched
+    against the file names, which is how a library of stock shots gets
+    used sensibly without a database.
+    """
+    if not sources.exists():
+        return None
+    prompt = (getattr(scene, "image_prompt", "") or "").strip().lower()
+    if not prompt:
+        return None
+
+    files = [p for p in sorted(sources.iterdir())
+             if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")]
+    if not files:
+        return None
+
+    # An exact file name in the prompt is a deliberate choice.
+    for path in files:
+        if path.name.lower() in prompt or path.stem.lower() in prompt:
+            return path
+
+    # Otherwise score on shared words. A tie goes to the earlier file,
+    # which keeps the result stable between runs.
+    words = {w for w in re.findall(r"[a-z]+", prompt) if len(w) > 2}
+    best, score = None, 0
+    for path in files:
+        name_words = set(re.findall(r"[a-z]+", path.stem.lower()))
+        hits = len(words & name_words)
+        if hits > score:
+            best, score = path, hits
+    return best
+
+
 def source_for(out: Path, scene) -> Path:
     """Where this scene's supplied picture would be.
 
@@ -129,8 +167,10 @@ def build_visual(scene, data: dict, spec: VideoSpec, out: Path,
     downscaled to the frame, so kenburns has the most pixels available to
     crop into.
     """
-    source = source_for(out, scene)
-    if source.exists():
+    sources = out.parent.parent / "sources"
+    # What the scene asked for, then what sits at its index.
+    source = matching_source(sources, scene) or source_for(out, scene)
+    if source and source.exists():
         out.parent.mkdir(parents=True, exist_ok=True)
         try:
             with Image.open(source) as im:

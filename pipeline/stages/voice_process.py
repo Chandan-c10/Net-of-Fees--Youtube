@@ -57,7 +57,20 @@ def concat_scene_audio(ep: Episode, m: Manifest, out: Path) -> Path:
 def run(ep: Episode, m: Manifest, master: bool = True) -> Path:
     log = get(m.id, "voice_process")
     raw = ep.audio_dir / "joined.wav"
-    concat_scene_audio(ep, m, raw)
+
+    # A continuous take is already one file: the voice stage wrote the
+    # whole script as a single utterance and there are no per-scene
+    # pieces to join. Concatenating would have nothing to work with.
+    if m.stage("voice").data.get("take") == "continuous":
+        if not ep.final_audio.exists():
+            raise StageError(
+                "the voice stage recorded a continuous take but left no "
+                f"audio at {ep.final_audio}; re-run it"
+            )
+        ep.final_audio.replace(raw)
+        log.debug("continuous take; nothing to join")
+    else:
+        concat_scene_audio(ep, m, raw)
 
     if not master:
         raw.replace(ep.final_audio)
