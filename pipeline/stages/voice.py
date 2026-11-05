@@ -7,6 +7,9 @@ becomes visible drift in the finished video.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from ..config import VOICES_DIR
 from ..errors import StageError
 from ..logging_setup import get
@@ -39,6 +42,31 @@ def run(ep: Episode, m: Manifest, engine_name: str = "silent",
         for v in voices_used:
             assert_consented(VOICES_DIR / v)
 
+    # A cloning engine needs reference audio, which is gitignored and so
+    # absent on a fresh runner. A configured URL is fetched here, used,
+    # and discarded afterwards so a shared machine keeps no copy.
+    fetched: list[Path] = []
+    if getattr(engine, "needs_reference", False):
+        from ..voices import fetch as voice_fetch
+        for v in voices_used:
+            into = VOICES_DIR / v / "reference"
+            got = voice_fetch.fetch(v, into, keep=True)
+            if got:
+                fetched.append(into)
+                log.info(f"reference for {v} fetched from its URL")
+
+    try:
+        _narrate(ep, m, engine, voices_used, log)
+    finally:
+        if fetched and not os.getenv("KEEP_VOICE_REFERENCE"):
+            from ..voices import fetch as voice_fetch
+            for into in fetched:
+                voice_fetch.discard(into)
+                log.debug(f"discarded the downloaded reference in {into}")
+    return
+
+
+def _narrate(ep: Episode, m: Manifest, engine, voices_used, log) -> None:
     lexicons = {v: load_lexicon(VOICES_DIR / v) for v in voices_used}
     total = 0.0
     for scene in m.scenes:
