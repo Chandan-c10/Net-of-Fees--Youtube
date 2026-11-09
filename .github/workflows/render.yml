@@ -39,6 +39,24 @@ jobs:
       SMTP_USER: ${{ secrets.SMTP_USER }}
       SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
       ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+      # Storage and pictures. Every one of these is safe to leave
+      # unset: the pipeline treats missing storage as "not configured"
+      # and an empty tuning value as its default.
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_STORAGE_CAP_GB: ${{ vars.R2_STORAGE_CAP_GB }}
+      R2_RETAIN_DAYS: ${{ vars.R2_RETAIN_DAYS }}
+      IMAGE_PROVIDERS: ${{ vars.IMAGE_PROVIDERS }}
+      IMAGE_MAX_NEW: ${{ vars.IMAGE_MAX_NEW }}
+      IMAGE_PACE_SEC: ${{ vars.IMAGE_PACE_SEC }}
+      IMAGE_STYLE: ${{ vars.IMAGE_STYLE }}
+      # A runner has no voice reference on disk; this is where it gets
+      # one. The key reads it from the private bucket, so no link exists
+      # that could clone the speaker if it leaked.
+      VOICE_REFERENCE_KEY: ${{ secrets.VOICE_REFERENCE_KEY }}
+      VOICE_REFERENCE_URL: ${{ secrets.VOICE_REFERENCE_URL }}
 
     steps:
       - uses: actions/checkout@v4
@@ -103,12 +121,27 @@ jobs:
           # schedule even if this file were changed to try.
           python run.py "$ID" --approve-script
 
+      # Pictures drawn by an earlier run, on this machine or any other.
+      # A runner starts with an empty disk, so without this every
+      # episode redraws every scene -- and the free generator refuses
+      # about half of what it is asked.
+      - name: Fetch the picture library
+        continue-on-error: true
+        run: python run.py archive --restore-library
+
       - name: Render
         run: |
           python run.py "$ID" \
             --voice-engine "$VOICE_ENGINE" \
             --look "${{ inputs.look }}"
           python run.py "$ID" --status
+
+      # The bucket outlives the artifact: a render artifact is deleted
+      # after seven days, and record/ and library/ never expire.
+      - name: Back up the record and the pictures
+        if: always()
+        continue-on-error: true
+        run: python run.py archive --backup
 
       # Only what reviewing needs. The whole directory is ~50 MB, most of
       # it scene WAVs that are no longer needed once the mix exists, and

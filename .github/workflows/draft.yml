@@ -33,6 +33,24 @@ jobs:
       SMTP_USER: ${{ secrets.SMTP_USER }}
       SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
       ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+      # Storage and pictures. Every one of these is safe to leave
+      # unset: the pipeline treats missing storage as "not configured"
+      # and an empty tuning value as its default.
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_STORAGE_CAP_GB: ${{ vars.R2_STORAGE_CAP_GB }}
+      R2_RETAIN_DAYS: ${{ vars.R2_RETAIN_DAYS }}
+      IMAGE_PROVIDERS: ${{ vars.IMAGE_PROVIDERS }}
+      IMAGE_MAX_NEW: ${{ vars.IMAGE_MAX_NEW }}
+      IMAGE_PACE_SEC: ${{ vars.IMAGE_PACE_SEC }}
+      IMAGE_STYLE: ${{ vars.IMAGE_STYLE }}
+      # A runner has no voice reference on disk; this is where it gets
+      # one. The key reads it from the private bucket, so no link exists
+      # that could clone the speaker if it leaked.
+      VOICE_REFERENCE_KEY: ${{ secrets.VOICE_REFERENCE_KEY }}
+      VOICE_REFERENCE_URL: ${{ secrets.VOICE_REFERENCE_URL }}
 
     steps:
       - uses: actions/checkout@v4
