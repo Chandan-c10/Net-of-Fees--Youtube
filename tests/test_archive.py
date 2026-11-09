@@ -483,3 +483,38 @@ def test_a_restored_video_lands_where_the_pipeline_expects_it(
     archive.restore_episode("001", tmp_path)
     names = {p.relative_to(tmp_path).as_posix() for p in written}
     assert names == {"001/out/video.mp4", "001/manifest.json"}
+
+
+# ---- what the bucket holds --------------------------------------------
+
+
+def test_archived_episodes_are_listed_newest_first(configured, monkeypatch):
+    listed = [
+        ("record/001/manifest.json", 4_000, "2026-11-01T10:00:00.000Z"),
+        ("episodes/001/video.mp4", 10_000_000, "2026-11-01T10:05:00.000Z"),
+        ("record/002/manifest.json", 4_000, "2026-11-08T10:00:00.000Z"),
+        ("library/abc.png", 70_000, "2026-11-09T10:00:00.000Z"),
+    ]
+    monkeypatch.setattr(archive, "_list_objects", lambda _t: listed)
+    rows = archive.archived_episodes(configured)
+    assert [r["id"] for r in rows] == ["002", "001"]
+    assert rows[1]["video"] is True
+    # The library is not an episode.
+    assert all(r["id"] != "abc.png" for r in rows)
+
+
+def test_an_episode_whose_video_expired_is_still_listed(
+        configured, monkeypatch):
+    """The record never expires, so an episode with no video left is
+    still restorable and still worth showing."""
+    monkeypatch.setattr(archive, "_list_objects", lambda _t: [
+        ("record/003/manifest.json", 4_000, "2026-11-01T10:00:00.000Z")])
+    rows = archive.archived_episodes(configured)
+    assert rows[0]["id"] == "003"
+    assert rows[0]["video"] is False
+
+
+def test_listing_without_storage_is_empty_not_an_error(monkeypatch):
+    for key in KEYS:
+        monkeypatch.delenv(key, raising=False)
+    assert archive.archived_episodes() == []

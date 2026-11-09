@@ -709,6 +709,7 @@ def render_index(panel: Panel, flash: tuple[str, bool] | None) -> bytes:
     for rows in groups.values():
         rows.sort(key=lambda r: (r[0], r[1]))
 
+    cloud = render_cloud_episodes(panel)
     waiting = len(groups["needs_you"])
     parts = [
         '<div class="row"><div class="grow">'
@@ -754,6 +755,9 @@ def render_index(panel: Panel, flash: tuple[str, bool] | None) -> bytes:
       <input id="id" type="text" name="id" placeholder="auto"></div>
     <button type="submit">Create</button>
   </div></form></div>""")
+
+    if cloud:
+        parts.append(cloud)
 
     if groups["done"]:
         rows = "".join(
@@ -839,6 +843,49 @@ SETTING_GROUPS = (
      ("PROFILE", "SCRIPT_ENGINE", "GEMINI_API_KEY", "YOUTUBE_API_KEY",
       "TREND_REGION")),
 )
+
+
+def render_cloud_episodes(panel: Panel) -> str:
+    """Episodes that exist in storage but not on this machine.
+
+    The queue reads the local episodes directory, so when the rendering
+    happens on a runner this panel shows nothing at all. The work is not
+    lost -- it is in the bucket -- but a review panel that cannot see
+    what it is meant to review is a panel that gets closed. Fetching one
+    brings it here to be watched and judged like any other.
+    """
+    from . import archive
+
+    target = archive.Target()
+    if not target.configured:
+        return ''
+    try:
+        rows = archive.archived_episodes(target)
+    except Exception as exc:                 # storage down is not fatal
+        return (f'<div class="card"><h3>In storage</h3>'
+                f'<p class="n">Could not read the bucket: {_esc(str(exc))}'
+                '</p></div>')
+    here = set(panel.episode_ids())
+    missing = [r for r in rows if r["id"] not in here]
+    if not missing:
+        return ''
+    t = panel.token
+    busy = bool((panel.job_snapshot() or {}).get("running"))
+    lines = []
+    for row in missing[:12]:
+        size = f'{row["bytes"] / 1e6:.0f} MB'
+        what = "video and record" if row["video"] else "record only"
+        fetch = _post("/fetch-episode", t, "Fetch",
+                      fields=f'<input type="hidden" name="episode" '
+                             f'value="{_esc(row["id"])}">',
+                      cls="ghost", disabled=busy)
+        lines.append(f'<p class="n"><span class="tag open">'
+                     f'{_esc(row["id"])}</span> {what}, {size} '
+                     f'{fetch}</p>')
+    return ('<div class="card"><h3>In storage</h3>'
+            '<p class="n">Rendered elsewhere and not on this machine '
+            'yet. Fetching one puts it in the queue to review.</p>'
+            + "".join(lines) + '</div>')
 
 
 def connect_outcome(panel: Panel) -> str:
@@ -1445,6 +1492,8 @@ class Handler(BaseHTTPRequestHandler):
                         note += f"; {len(result['kept'])} kept"
                 return self._redirect(
                     f"/settings{_q(self.panel.token, ok=note)}")
+            if path == "fetch-episode":
+                return self._fetch_episode(form)
             if path == "connect-youtube":
                 return self._connect_youtube(form)
 
@@ -1503,6 +1552,24 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
         return None
+
+    def _fetch_episode(self, form: dict):
+        """Bring one archived episode here so it can be reviewed.
+
+        Run as a job rather than inline: a video is tens of megabytes
+        and a request that blocks on it looks like a hung panel.
+        """
+        episode_id = (form.get("episode") or "").strip()
+        if not EPISODE_ID.match(episode_id):
+            return self._redirect(
+                f"/{_q(self.panel.token, err='that is not an episode id')}")
+        try:
+            note = self.panel.start_job(
+                episode_id, ["archive", "--restore", episode_id],
+                f"fetch {episode_id}")
+        except PipelineError as exc:
+            note = str(exc)
+        return self._redirect(f"/{_q(self.panel.token, ok=note)}")
 
     def _connect_youtube(self, form: dict):
         """Run Google's loopback OAuth for a channel.

@@ -668,6 +668,35 @@ def fetch(key: str, out: Path, target: Target | None = None) -> Path:
     return out
 
 
+def archived_episodes(target: Target | None = None) -> list[dict]:
+    """Every episode the bucket holds, newest first.
+
+    Keyed on the record rather than the video, because the record is
+    what never expires: an episode whose video has aged out is still
+    restorable, and still worth showing.
+    """
+    target = target or Target()
+    if not target.configured:
+        return []
+    found: dict[str, dict] = {}
+    for key, size, modified in _list_objects(target):
+        parts = key.split("/", 2)
+        if len(parts) < 3 or parts[0] not in ("record", "episodes"):
+            continue
+        episode_id = parts[1]
+        row = found.setdefault(episode_id, {
+            "id": episode_id, "bytes": 0, "video": False,
+            "files": [], "modified": modified,
+        })
+        row["bytes"] += size
+        row["files"].append(parts[2])
+        if parts[2] == "video.mp4":
+            row["video"] = True
+        if modified > row["modified"]:
+            row["modified"] = modified
+    return sorted(found.values(), key=lambda r: r["modified"], reverse=True)
+
+
 def restore_episode(episode_id: str, into: Path,
                     target: Target | None = None, log=None) -> list[str]:
     """Bring one episode back from the bucket.

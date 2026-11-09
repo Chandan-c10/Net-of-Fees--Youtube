@@ -390,3 +390,63 @@ def test_a_tailnet_bind_with_a_token_passes_the_guard():
     with pytest.raises(OSError):
         # Past the token check, it fails on the socket instead.
         dashboard.build("100.101.102.103", 0, "tok")
+
+
+# ---- episodes that were rendered somewhere else ------------------------
+
+
+def test_storage_episodes_appear_with_a_fetch_button(server, monkeypatch):
+    """The queue reads the local directory, so when the rendering
+    happens on a runner this panel shows nothing at all. The work is not
+    lost -- it is in the bucket."""
+    from pipeline import archive
+
+    monkeypatch.setattr(archive.Target, "configured",
+                        property(lambda self: True))
+    monkeypatch.setattr(archive, "archived_episodes", lambda _t: [
+        {"id": "901", "bytes": 12_000_000, "video": True,
+         "files": ["video.mp4"], "modified": "2026-11-09T10:00:00.000Z"}])
+    base, _ep, _m = server
+    status, body = get(base, "/")
+    assert status == 200
+    page = body.decode()
+    assert "901" in page
+    assert "/fetch-episode" in page
+
+
+def test_an_episode_already_here_is_not_offered_again(server, monkeypatch):
+    from pipeline import archive
+
+    monkeypatch.setattr(archive.Target, "configured",
+                        property(lambda self: True))
+    monkeypatch.setattr(archive, "archived_episodes", lambda _t: [
+        {"id": "777", "bytes": 1, "video": True, "files": [],
+         "modified": "2026-11-09T10:00:00.000Z"}])
+    base, _ep, _m = server
+    _status, body = get(base, "/")
+    assert "/fetch-episode" not in body.decode()
+
+
+def test_storage_being_down_does_not_break_the_queue(server, monkeypatch):
+    from pipeline import archive
+
+    def explode(_t):
+        raise OSError("bucket unreachable")
+
+    monkeypatch.setattr(archive.Target, "configured",
+                        property(lambda self: True))
+    monkeypatch.setattr(archive, "archived_episodes", explode)
+    base, _ep, _m = server
+    status, body = get(base, "/")
+    assert status == 200
+    assert "Could not read the bucket" in body.decode()
+
+
+def test_fetching_a_made_up_id_is_refused(server):
+    """An episode id becomes a directory name, so it is validated
+    rather than trusted."""
+    base, _ep, _m = server
+    status, location = post(base, "/fetch-episode",
+                            {"episode": "../../etc"})
+    assert status == 303
+    assert "not an episode id" in message_of(location)
