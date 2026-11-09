@@ -417,6 +417,13 @@ def build_parser() -> argparse.ArgumentParser:
     ar.add_argument("--prune", action="store_true",
                     help="delete objects past R2_RETAIN_DAYS")
     ar.add_argument("--dry-run", action="store_true")
+    ar.add_argument("--backup", action="store_true",
+                    help="store every episode's record and the picture "
+                         "library; neither ever expires")
+    ar.add_argument("--restore", metavar="ID",
+                    help="bring one episode back from the bucket")
+    ar.add_argument("--restore-library", action="store_true",
+                    help="bring the reusable pictures back")
     ar.add_argument("-v", "--verbose", action="store_true")
     ar.set_defaults(func=cmd_archive)
 
@@ -610,6 +617,40 @@ def cmd_archive(args) -> int:
         print("\n  archive storage is not configured: "
               + ", ".join(target.missing()) + "\n")
         return 0
+    if args.restore:
+        landed = archive.restore_episode(args.restore, config.EPISODES_DIR)
+        print(f"\n  restored {len(landed)} files into "
+              f"episodes/{args.restore}/")
+        for name in landed:
+            print(f"    {name}")
+        print()
+        return 0
+
+    if args.restore_library:
+        count = archive.restore_library()
+        print(f"\n  restored {count} pictures into the library\n")
+        return 0
+
+    if args.backup:
+        from pipeline.manifest import Episode
+        stored = 0
+        for directory in sorted(p for p in config.EPISODES_DIR.iterdir()
+                                if p.is_dir()):
+            if not (directory / "manifest.json").exists():
+                continue
+            ep = Episode(directory.name, config.EPISODES_DIR)
+            try:
+                m = ep.load_manifest()
+            except Exception as exc:
+                print(f"    {directory.name}: {exc}")
+                continue
+            stored += len(archive.archive_record(ep, m, target))
+        shelf = archive.archive_library(target)
+        print(f"\n  {stored} record files stored")
+        print(f"  library: {len(shelf.get('stored', []))} stored, "
+              f"{shelf.get('skipped', 0)} already there\n")
+        return 0
+
     if args.prune:
         result = archive.expire(target, dry_run=args.dry_run)
         if not result["enabled"]:

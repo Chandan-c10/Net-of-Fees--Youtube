@@ -30,6 +30,7 @@ import datetime as dt
 import hashlib
 import hmac
 import os
+import shutil
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -302,6 +303,11 @@ def expire(target: Target | None = None, dry_run: bool = False,
 
     removed, freed, kept = [], 0, 0
     for key, size, modified in _list_objects(target):
+        if is_permanent(key):
+            # The backup does not expire. Everything under these
+            # prefixes is the only copy of something.
+            kept += 1
+            continue
         age = _age_days(modified)
         if age is None or age < keep:
             kept += 1
@@ -433,9 +439,48 @@ def signed_get(target: Target, key: str,
     return f"{target.endpoint}{path}{suffix}", headers
 
 
+# Prefixes that expiry never touches.
+#
+# The rest of the bucket is a third copy: the local file and the
+# published video both predate it, so deleting by age loses nothing.
+# These are not. They are the backup -- the only copy if the laptop
+# goes -- and expiring them would mean the safety net deleting itself
+# on a schedule.
+PERMANENT = ("record/", "library/")
+
+# Small, and the whole account of what an episode is. A video can be
+# re-rendered from these; they cannot be recovered from a video.
+RECORD_FILES = ("manifest.json", "script.md", "metadata.json",
+                "cues.json", "captions.srt")
+
+CONTENT_TYPES = {
+    ".json": "application/json", ".md": "text/markdown",
+    ".srt": "text/plain", ".png": "image/png", ".jpg": "image/jpeg",
+    ".mp4": "video/mp4", ".wav": "audio/wav",
+}
+
+
+def content_type_for(path: Path) -> str:
+    return CONTENT_TYPES.get(path.suffix.lower(), "application/octet-stream")
+
+
+def is_permanent(key: str) -> bool:
+    return key.startswith(PERMANENT)
+
+
 def key_for(episode_id: str, name: str) -> str:
     """Where an episode's file lives in the bucket."""
     return f"episodes/{episode_id}/{name}"
+
+
+def record_key(episode_id: str, name: str) -> str:
+    """Where an episode's record lives. Never expired."""
+    return f"record/{episode_id}/{name}"
+
+
+def library_key(name: str) -> str:
+    """Where a reusable picture lives. Never expired."""
+    return f"library/{name}"
 
 
 def put(path: Path, key: str, target: Target | None = None,
@@ -529,8 +574,146 @@ def archive_episode(ep, m, log=None) -> str | None:
     except (ConfigError, StageError):
         pass
     m.stage("assemble").data["archive_url"] = url
+    # The video is the big thing; the record is the important one.
+    archive_record(ep, m, target, log)
     log.info(f"archived to {url}")
     return url
+
+
+def archive_record(ep, m, target: Target | None = None, log=None) -> list[str]:
+    """Store the account of what this episode is.
+
+    A few kilobytes against tens of megabytes of video, and worth more:
+    a video can be re-rendered from the manifest and the script, and
+    neither can be recovered from a video. Never expired.
+    """
+    log = log or get(m.id, "archive")
+    target = target or Target()
+    directory = getattr(ep, "dir", None)
+    if not target.configured or directory is None:
+        # Archiving is insurance, and insurance that fails the render it
+        # was protecting is worse than none. That applies to a caller
+        # that hands over something which is not quite an episode too.
+        return []
+    stored = []
+    for name in RECORD_FILES:
+        path = directory / name
+        if not path.exists():
+            continue
+        try:
+            put(path, record_key(m.id, name), target,
+                content_type_for(path))
+            stored.append(name)
+        except (ConfigError, StageError) as exc:
+            log.warning(f"could not store {name}: {exc}")
+    if stored:
+        log.info(f"record stored: {', '.join(stored)}")
+    return stored
+
+
+def archive_library(target: Target | None = None, log=None) -> dict:
+    """Store the reusable pictures, skipping what is already there.
+
+    Each picture is named after the prompt that drew it, so the same
+    picture never uploads twice. Losing the library costs nothing but
+    time -- and on a free generator that half-refuses, time is the
+    expensive part.
+    """
+    from . import image_library
+
+    log = log or get(None, "archive")
+    target = target or Target()
+    if not target.configured:
+        return {"enabled": False, "note": "archive storage is not configured"}
+
+    have = {key for key, _size, _mod in _list_objects(target)
+            if key.startswith("library/")}
+    entries = image_library.load()
+    sent, skipped = [], 0
+    for entry in entries:
+        key = library_key(entry.file)
+        if key in have:
+            skipped += 1
+            continue
+        try:
+            put(entry.path, key, target, "image/png")
+            sent.append(entry.file)
+        except (ConfigError, StageError) as exc:
+            log.warning(f"could not store {entry.file}: {exc}")
+    index = image_library.index_path()
+    if index.exists():
+        try:
+            put(index, library_key("index.json"), target, "application/json")
+        except (ConfigError, StageError) as exc:
+            log.warning(f"could not store the library index: {exc}")
+    log.info(f"library: {len(sent)} stored, {skipped} already there")
+    return {"enabled": True, "stored": sent, "skipped": skipped,
+            "pictures": len(entries)}
+
+
+def fetch(key: str, out: Path, target: Target | None = None) -> Path:
+    """Download one archived object to a local path."""
+    target = target or Target()
+    url, headers = signed_get(target, key)
+    request = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT_SEC) as resp:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            with out.open("wb") as handle:
+                shutil.copyfileobj(resp, handle, 1 << 20)
+    except urllib.error.HTTPError as exc:
+        raise StageError(f"{key} could not be fetched: {exc.code}") from exc
+    except urllib.error.URLError as exc:
+        raise StageError(f"{key} could not be fetched: {exc.reason}") from exc
+    return out
+
+
+def restore_episode(episode_id: str, into: Path,
+                    target: Target | None = None, log=None) -> list[str]:
+    """Bring one episode back from the bucket.
+
+    The record first, because it is what makes the directory an episode
+    rather than a loose video.
+    """
+    log = log or get(episode_id, "archive")
+    target = target or Target()
+    if not target.configured:
+        raise ConfigError("archive storage is not configured: "
+                          + ", ".join(target.missing()))
+    keys = [key for key, _size, _mod in _list_objects(target)
+            if key.startswith((f"record/{episode_id}/",
+                               f"episodes/{episode_id}/"))]
+    if not keys:
+        raise StageError(f"nothing archived for {episode_id!r}")
+    landed = []
+    for key in sorted(keys):
+        name = key.split("/", 2)[-1]
+        out = into / episode_id / ("out/video.mp4" if name == "video.mp4"
+                                   else name)
+        fetch(key, out, target)
+        landed.append(name)
+    log.info(f"restored {len(landed)} files for {episode_id}")
+    return landed
+
+
+def restore_library(target: Target | None = None, log=None) -> int:
+    """Bring the reusable pictures back."""
+    from . import image_library
+
+    log = log or get(None, "archive")
+    target = target or Target()
+    if not target.configured:
+        raise ConfigError("archive storage is not configured: "
+                          + ", ".join(target.missing()))
+    directory = image_library.library_dir()
+    count = 0
+    for key, _size, _mod in _list_objects(target):
+        if not key.startswith("library/"):
+            continue
+        fetch(key, directory / key.split("/", 1)[1], target)
+        count += 1
+    log.info(f"restored {count} library files")
+    return count
 
 
 def test_target() -> tuple[bool, str]:

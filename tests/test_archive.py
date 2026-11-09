@@ -399,3 +399,87 @@ def test_object_age_is_read_from_the_listing(modified, older):
         assert age is None
     else:
         assert age and age > 365
+
+
+# ---- the backup must not expire itself --------------------------------
+
+
+def test_expiry_never_touches_the_backup(configured, monkeypatch):
+    """The rest of the bucket is a third copy, so deleting by age loses
+    nothing. These prefixes are the only copy if the laptop goes, and
+    expiring them would be the safety net deleting itself on a
+    schedule."""
+    old = (dt.datetime.now(dt.UTC) - dt.timedelta(days=400)).strftime(
+        "%Y-%m-%dT%H:%M:%S.000Z")
+    listed = [
+        ("episodes/001/video.mp4", 10_000_000, old),
+        ("record/001/manifest.json", 4_000, old),
+        ("record/001/script.md", 9_000, old),
+        ("library/abc123.png", 70_000, old),
+    ]
+    monkeypatch.setattr(archive, "_list_objects", lambda _t: listed)
+    monkeypatch.setenv("R2_RETAIN_DAYS", "7")
+
+    result = archive.expire(configured, dry_run=True)
+    gone = {row["key"] for row in result["removed"]}
+    assert gone == {"episodes/001/video.mp4"}
+    assert result["kept"] == 3
+
+
+def test_every_permanent_prefix_is_recognised():
+    for key in ("record/001/manifest.json", "library/abc.png"):
+        assert archive.is_permanent(key)
+    for key in ("episodes/001/video.mp4", "recordings/x", "lib/x"):
+        assert not archive.is_permanent(key)
+
+
+def test_a_record_file_is_sent_with_its_own_content_type():
+    from pathlib import Path
+
+    assert archive.content_type_for(Path("manifest.json")) == \
+        "application/json"
+    assert archive.content_type_for(Path("script.md")) == "text/markdown"
+    assert archive.content_type_for(Path("a.png")) == "image/png"
+    # An unknown suffix must still upload, as bytes.
+    assert archive.content_type_for(Path("x.weird")) == \
+        "application/octet-stream"
+
+
+def test_the_record_keys_are_separate_from_the_video():
+    assert archive.record_key("001", "manifest.json") == \
+        "record/001/manifest.json"
+    assert archive.key_for("001", "video.mp4") == "episodes/001/video.mp4"
+
+
+def test_restoring_without_storage_configured_says_so(monkeypatch, tmp_path):
+    for key in KEYS:
+        monkeypatch.delenv(key, raising=False)
+    with pytest.raises(ConfigError, match="not configured"):
+        archive.restore_episode("001", tmp_path)
+
+
+def test_restoring_an_episode_that_was_never_archived_says_so(
+        configured, monkeypatch, tmp_path):
+    monkeypatch.setattr(archive, "_list_objects", lambda _t: [])
+    with pytest.raises(StageError, match="nothing archived"):
+        archive.restore_episode("001", tmp_path)
+
+
+def test_a_restored_video_lands_where_the_pipeline_expects_it(
+        configured, monkeypatch, tmp_path):
+    """Not next to the manifest: the renderer looks in out/."""
+    listed = [("episodes/001/video.mp4", 10, "x"),
+              ("record/001/manifest.json", 4, "x")]
+    monkeypatch.setattr(archive, "_list_objects", lambda _t: listed)
+    written = []
+
+    def fake_fetch(key, out, target=None):
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"x")
+        written.append(out)
+        return out
+
+    monkeypatch.setattr(archive, "fetch", fake_fetch)
+    archive.restore_episode("001", tmp_path)
+    names = {p.relative_to(tmp_path).as_posix() for p in written}
+    assert names == {"001/out/video.mp4", "001/manifest.json"}
