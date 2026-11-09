@@ -96,8 +96,90 @@ python run.py 001 --from charts          # resume from a stage
 python run.py 001 --stage assemble --force   # re-run one stage
 python run.py 001 --voice-engine cloned  # use a real voice
 python run.py 001 --captions whisper     # true word-level timing
-pytest                                   # 57 tests, no network needed
+python run.py check 001                  # inspect the rendered file
+python run.py connect                    # authorise a YouTube channel
+pytest                                   # the full suite, no network needed
 ```
+
+### Pictures
+
+Each scene carries an `IMAGE:` line written with the script, and the
+`images` stage draws it.
+
+```bash
+python run.py 001 --stage images --force     # draw what is still missing
+python run.py 001 --refetch-images           # draw every scene again
+```
+
+`--force` re-runs the stage and **keeps** the pictures it already has.
+Redrawing is `--refetch-images`, a separate flag on purpose: on a free
+generator those are requests you may not get back.
+
+A picture drawn once is kept in `state/images` and reused when a later
+scene asks for something close. Settings, all optional:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `IMAGE_MAX_NEW` | `0` | how many NEW pictures one episode may draw; 0 is no limit. Set 6 and a 14-scene episode draws six and reuses them |
+| `IMAGE_PROVIDERS` | `pollinations` | add `,openverse` for Creative Commons stock as a fallback |
+| `IMAGE_PACE_SEC` | `8` | seconds between requests; the free generator refuses bursts |
+| `IMAGE_REUSE` | `1` | `0` draws everything fresh |
+| `IMAGE_FETCH` | `1` | `0` to place pictures in `sources/` by hand |
+
+The free generator caps at 589,824 pixels (576x1024 vertical) and
+refuses about half of what it is asked whatever the spacing, because the
+capacity is shared. The stage keeps what it drew, so running it again
+fills the gaps rather than starting over.
+
+### Storage and backup
+
+```bash
+python run.py archive                    # what the bucket holds
+python run.py archive --backup           # store every record + the pictures
+python run.py archive --restore 001      # bring one episode back
+python run.py archive --restore-library  # bring the pictures back
+python run.py archive --prune --dry-run  # what would expire
+```
+
+Videos expire after `R2_RETAIN_DAYS` (default 7). The episode record and
+the picture library **never** expire: they are small, they are the only
+copy if a machine goes, and a backup that deletes itself on a schedule
+is not a backup.
+
+---
+
+## Moving to another machine
+
+Nothing here is tied to one laptop. Everything that matters is in git or
+in the bucket.
+
+```bash
+git clone https://github.com/Chandan-c10/Net-of-Fees--Youtube
+cd Net-of-Fees--Youtube
+bash setup.sh                            # or: powershell -File setup.ps1
+python run.py doctor                     # proves the environment works
+
+python run.py archive --restore-library  # your pictures come back
+python run.py archive --restore 001      # any episode you want locally
+python run.py connect                    # re-authorise YouTube
+```
+
+What does **not** come from git, and where to get it again:
+
+| | How it comes back |
+|---|---|
+| `.env` | copy it, or retype it in the panel under Settings |
+| `secrets/client_secret.json` | download again from the Google Cloud console |
+| `secrets/youtube_token.json` | `python run.py connect` |
+| panel password | set a new one; delete `secrets/panel.json` first |
+| `state/images` | `python run.py archive --restore-library` |
+| `episodes/` | `python run.py archive --restore <id>` |
+| voice reference | from the bucket via `VOICE_REFERENCE_KEY`, or copy the folder |
+| `.venv` | never copy it. `setup.sh` builds it |
+
+`.env` holds credentials. Move it the way you would move a password, or
+retype the values on the new machine — every one of them can be
+regenerated from the console it came from.
 
 ---
 
@@ -353,14 +435,24 @@ storage on the free plan is 500 MB.
 |---|---|
 | `YOUTUBE_TOKEN_JSON` | the contents of `secrets/youtube_token.json`, pasted. Run `tools/youtube_auth.py` once on any machine to create it. |
 | `IG_USER_ID`, `IG_ACCESS_TOKEN` | the Reel |
+| `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | storing what a run makes, and fetching the pictures it drew last time |
+| `VOICE_REFERENCE_KEY` | the key in that bucket holding your voice recording |
+
+And as repository **variables** (not secrets — none of these are
+credentials, and they are easier to change): `IMAGE_MAX_NEW`,
+`IMAGE_PROVIDERS`, `IMAGE_PACE_SEC`, `IMAGE_STYLE`, `R2_RETAIN_DAYS`,
+`R2_STORAGE_CAP_GB`. Every one is optional; an unset variable falls back
+to its default.
 
 `publish` writes the token to disk, uses it, and deletes it in an
 `always()` step so it does not survive the job.
 
-One thing this cannot do: a voice cloned from your own recording needs
-the reference audio, which is gitignored and too large for a secret.
-Cloud runs use the licensed Kokoro voices. Your own voice means rendering
-on a machine that has your recordings.
+**Your own voice does work on a runner.** The reference audio is
+gitignored and too large for a secret, so it lives in the bucket and the
+run fetches it by key. `VOICE_REFERENCE_KEY` is preferred over
+`VOICE_REFERENCE_URL`: a key is read with the credentials the run
+already has, so no link exists that could clone you if it leaked. The
+runner deletes what it downloaded when it finishes.
 
 ## Alerts
 
