@@ -718,3 +718,33 @@ def test_a_failed_redraw_keeps_the_old_picture_and_says_so(
                                        "scene_03.png"]
     for scene in story.scenes:
         assert (sources / f"{scene.slug}.png").exists()
+
+
+def test_a_400_from_the_generator_is_retried(monkeypatch):
+    """A well-behaved API means "your request is wrong" by 400. This one
+    answers 400, 402 and 503 interchangeably when busy -- the same short,
+    uncontroversial prompt got all three within a minute."""
+    monkeypatch.setattr(images, "BACKOFF_SEC", (0.0, 0.0))
+    attempts = {"n": 0}
+
+    def flaky(url, data=None, headers=None):
+        attempts["n"] += 1
+        raise images.Unavailable("image.pollinations.ai returned 400", 400)
+
+    with pytest.raises(StageError, match="400"):
+        images.from_pollinations("a village", 512, 512, 1, flaky)
+    assert attempts["n"] == 3, "a 400 from this endpoint was believed"
+
+
+def test_a_400_from_the_stock_library_is_not_retried(monkeypatch):
+    """The exception is the generator's alone."""
+    monkeypatch.setattr(images, "BACKOFF_SEC", (0.0, 0.0))
+    attempts = {"n": 0}
+
+    def flaky(url, data=None, headers=None):
+        attempts["n"] += 1
+        raise images.Unavailable("api.openverse.org returned 400", 400)
+
+    with pytest.raises(StageError, match="400"):
+        images.from_openverse("a village", 512, 512, 1, flaky)
+    assert attempts["n"] == 1

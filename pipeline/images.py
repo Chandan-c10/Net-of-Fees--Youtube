@@ -282,7 +282,9 @@ def _open(url: str, data: bytes | None = None,
 
 def _open_patiently(open_url, url: str, data: bytes | None = None,
                     headers: dict[str, str] | None = None,
-                    log=None) -> tuple[bytes, str]:
+                    log=None,
+                    also_retry: frozenset[int] = frozenset()
+                    ) -> tuple[bytes, str]:
     """Fetch, waiting out a busy server.
 
     Eleven of fourteen scenes came back 402 from a free endpoint that
@@ -294,7 +296,7 @@ def _open_patiently(open_url, url: str, data: bytes | None = None,
         try:
             return opener(url, data, headers)
         except Unavailable as exc:
-            if pause is None or exc.code not in RETRY_STATUSES:
+            if pause is None or exc.code not in (RETRY_STATUSES | also_retry):
                 raise
             if log:
                 log.debug(f"{exc}; waiting {pause:.0f}s "
@@ -328,7 +330,13 @@ def from_pollinations(prompt: str, width: int, height: int, seed: int,
     })
     url = ("https://image.pollinations.ai/prompt/"
            f"{urllib.parse.quote(prompt, safe='')}?{query}")
-    body, kind = _open_patiently(open_url, url)
+    # 400 is retryable here and nowhere else. A well-behaved API means
+    # "your request is wrong" by it, and retrying is pointless. This one
+    # answers 400, 402 and 503 interchangeably when it is busy: the same
+    # short, uncontroversial prompt got all three within a minute. So
+    # the status says nothing about the request and only patience helps.
+    body, kind = _open_patiently(open_url, url,
+                                 also_retry=frozenset({400}))
     # The bytes decide, not the content type. Under load this endpoint
     # answers with a text error at HTTP 200 and still labels it
     # image/jpeg, so believing the header means saving an error message
