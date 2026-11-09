@@ -827,10 +827,42 @@ SETTING_GROUPS = (
                  "automatically. Set IMAGE_FETCH to 0 to place pictures "
                  "in sources/ yourself.",
      ("IMAGE_PROVIDERS", "IMAGE_FETCH", "IMAGE_STYLE", "IMAGE_LOCAL_URL")),
+    ("Reusing pictures", "A picture drawn once is kept and used again "
+                         "when a later scene asks for something close. "
+                         "IMAGE_MAX_NEW caps how many an episode draws \u2014 "
+                         "set it to 6 and a fourteen-scene episode draws "
+                         "six and reuses them, which is faster and often "
+                         "looks better than fourteen near-identical ones. "
+                         "0 means no cap.",
+     ("IMAGE_MAX_NEW", "IMAGE_REUSE", "IMAGE_REUSE_THRESHOLD")),
     ("Content", "Defaults for new episodes and the trend scan.",
      ("PROFILE", "SCRIPT_ENGINE", "GEMINI_API_KEY", "YOUTUBE_API_KEY",
       "TREND_REGION")),
 )
+
+
+def connect_outcome(panel: Panel) -> str:
+    """What the last connect attempt did.
+
+    A connect job is not an episode, so its output appeared on no page:
+    you pressed the button, read "Started", and never learned whether a
+    consent screen opened or the client secret was missing. The queue
+    shows a render's log because a render has an episode to show it on;
+    this is the same courtesy for the one job that has not.
+    """
+    job = panel.job_snapshot()
+    if not job or not job["label"].startswith("connect"):
+        return ""
+    if job["running"]:
+        return ('<p class="n">Connecting&hellip; a browser tab should have '
+                'opened. Finish the consent screen there.</p>')
+    lines = [line for line in job["lines"] if line.strip()][-8:]
+    tone = "ok" if job["returncode"] == 0 else "bad"
+    head = ("Connected." if job["returncode"] == 0
+            else "That did not connect.")
+    body = _esc("\n".join(lines)) if lines else ""
+    return (f'<p class="n"><span class="tag {tone}">{head}</span></p>'
+            + (f'<pre class="log">{body}</pre>' if body else ""))
 
 
 def render_settings(panel: Panel, flash: tuple[str, bool] | None) -> bytes:
@@ -876,7 +908,8 @@ def render_settings(panel: Panel, flash: tuple[str, bool] | None) -> bytes:
         + '<p class="n">Opens Google&rsquo;s consent screen in a browser '
           'on this machine. Needs secrets/client_secret.json from the '
           'Cloud console.</p>'
-        + f'<div class="acts" style="margin-top:10px">{connect}</div></div>')
+        + f'<div class="acts" style="margin-top:10px">{connect}</div>'
+        + connect_outcome(panel) + '</div>')
 
     form_parts = []
     for title, note, names in SETTING_GROUPS:

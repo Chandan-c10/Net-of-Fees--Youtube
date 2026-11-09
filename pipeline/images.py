@@ -38,6 +38,7 @@ import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from . import image_library
 from .errors import ConfigError, StageError
 from .logging_setup import get
 
@@ -624,9 +625,18 @@ def run_for(ep, m, spec, profile=None, force: bool = False,
 
     existing = {c.scene: c for c in load_credits(ep)}
     rows: list[Credit] = []
-    made, kept, failed, stale = [], [], {}, []
+    made, kept, failed, stale, reused = [], [], {}, [], []
     pace = pace_sec()
     sent = 0
+    # Read once and extended in memory, so a picture drawn for scene 2
+    # is available to scene 5 in the same run without re-reading the
+    # index fourteen times.
+    shelf = image_library.load()
+    budget = image_library.max_new()
+    # Pictures drawn for this episode. The budget falls back to these
+    # rather than to the whole library, so a scene that runs out of
+    # budget still gets a picture from its own story.
+    mine: list[image_library.Entry] = []
     for scene in m.scenes:
         out = sources / f"scene_{scene.index:02d}.png"
         if out.exists() and not force:
@@ -634,6 +644,29 @@ def run_for(ep, m, spec, profile=None, force: bool = False,
             rows.append(existing.get(scene.index) or Credit(
                 scene.index, "supplied", "unknown"))
             continue
+
+        # A picture already drawn for a close enough prompt. Most of a
+        # story returns to the same few subjects, and four slightly
+        # different men on four slightly different doorsteps is worse
+        # than one man seen four ways.
+        raw = (getattr(scene, "image_prompt", "") or "").strip()
+        match = image_library.find(raw, shelf) if raw else None
+        if not match and raw and budget and len(made) >= budget and mine:
+            # The budget is spent. Reuse the nearest picture this
+            # episode already has rather than drawing another or
+            # leaving a title card.
+            match = image_library.closest(raw, mine)
+        if match:
+            entry, score = match
+            image_library.reuse(entry, out)
+            reused.append(out.name)
+            rows.append(Credit(scene.index, entry.provider or "library",
+                               entry.license or "generated",
+                               entry.source_url, entry.creator,
+                               entry.native))
+            log.info(f"{scene.slug} <- library ({score:.0%} match)")
+            continue
+
         if sent and pace:
             time.sleep(pace)
         sent += 1
@@ -662,6 +695,11 @@ def run_for(ep, m, spec, profile=None, force: bool = False,
         rows.append(Credit(scene.index, credit.provider, credit.license,
                            credit.source_url, credit.creator, credit.native))
         made.append(out.name)
+        if raw and image_library.enabled():
+            entry = image_library.add(raw, out, asdict(credit),
+                                      credit.native)
+            shelf.append(entry)
+            mine.append(entry)
         drawn = credit.native.split("x")
         if drawn and drawn[0].isdigit() and int(drawn[0]) < spec.width:
             # Not an error: it is the free ceiling, and a scaled picture
@@ -675,8 +713,10 @@ def run_for(ep, m, spec, profile=None, force: bool = False,
     if rows:
         save_credits(ep, rows)
     return {
-        "made": made, "kept": kept, "failed": failed, "stale": stale,
+        "made": made, "kept": kept, "reused": reused,
+        "failed": failed, "stale": stale,
         "size": f"{width}x{height}",
+        "max_new": budget,
         "providers": list(providers()),
         "attribution": bool(attribution_lines(ep)),
     }

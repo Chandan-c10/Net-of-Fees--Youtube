@@ -75,6 +75,19 @@ class _Routes(BaseHTTPRequestHandler):
 
 
 @pytest.fixture(autouse=True)
+def isolated_library(tmp_path, monkeypatch):
+    """A library of its own per test.
+
+    The real one lives in the repo. A suite that wrote into it would
+    pollute it and, worse, read pictures it did not put there -- which
+    is how a fetch test stops fetching.
+    """
+    monkeypatch.setenv("IMAGE_LIBRARY_DIR", str(tmp_path / "library"))
+    monkeypatch.setenv("IMAGE_REUSE", "0")
+    monkeypatch.delenv("IMAGE_MAX_NEW", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def no_waiting(monkeypatch):
     """The pace between scenes and the backoff between attempts are real
     seconds against a real endpoint. Here they are zero, so a suite that
@@ -748,3 +761,108 @@ def test_a_400_from_the_stock_library_is_not_retried(monkeypatch):
     with pytest.raises(StageError, match="400"):
         images.from_openverse("a village", 512, 512, 1, flaky)
     assert attempts["n"] == 1
+
+
+# ---- reusing a picture instead of drawing another ---------------------
+
+
+def test_a_close_enough_prompt_reuses_the_picture(tmp_path, monkeypatch):
+    """A story returns to the same subject. Four slightly different men
+    on four slightly different doorsteps is worse than one man seen four
+    ways."""
+    from pipeline import image_library as lib
+
+    monkeypatch.setenv("IMAGE_REUSE", "1")
+    picture = tmp_path / "drawn.png"
+    picture.write_bytes(_png())
+    lib.add("a small grey langur monkey on a dusty village lane at dawn",
+            picture, {"provider": "pollinations", "license": "generated"})
+
+    found = lib.find(
+        "a small grey langur monkey on a dusty village lane carrying a coin")
+    assert found is not None
+    entry, score = found
+    assert score >= lib.threshold()
+    assert entry.provider == "pollinations"
+
+
+def test_a_different_subject_is_not_reused(tmp_path, monkeypatch):
+    from pipeline import image_library as lib
+
+    monkeypatch.setenv("IMAGE_REUSE", "1")
+    picture = tmp_path / "drawn.png"
+    picture.write_bytes(_png())
+    lib.add("a small grey langur monkey on a dusty village lane", picture)
+    assert lib.find("a frail woman asleep on a rope cot indoors") is None
+
+
+def test_shot_words_do_not_make_two_prompts_the_same():
+    """Two prompts are not the same picture because both say "medium
+    shot", and not different because one does."""
+    from pipeline import image_library as lib
+
+    assert lib.words("a man on a doorstep, medium shot") == {"man", "doorstep"}
+
+
+def test_reuse_can_be_turned_off(tmp_path, monkeypatch):
+    from pipeline import image_library as lib
+
+    picture = tmp_path / "drawn.png"
+    picture.write_bytes(_png())
+    lib.add("a village lane at dawn", picture)
+    monkeypatch.setenv("IMAGE_REUSE", "0")
+    assert lib.find("a village lane at dawn") is None
+
+
+def test_an_index_entry_whose_file_is_gone_is_skipped(tmp_path, monkeypatch):
+    """The library is a cache; emptying the directory must not break."""
+    from pipeline import image_library as lib
+
+    picture = tmp_path / "drawn.png"
+    picture.write_bytes(_png())
+    entry = lib.add("a village lane at dawn", picture)
+    entry.path.unlink()
+    assert lib.load() == []
+
+
+def test_the_budget_caps_how_many_pictures_are_drawn(
+        local, episode, story, monkeypatch):
+    """"I do not need a new image for every scene", expressed as a
+    number rather than as a similarity score that cannot tell "the same
+    man, calmer" from "the same man, broken"."""
+    from pipeline.config import SHORTS
+
+    open_url, routes = local
+    monkeypatch.delenv("IMAGE_STYLE", raising=False)
+    monkeypatch.setenv("IMAGE_REUSE", "1")
+    monkeypatch.setenv("IMAGE_REUSE_THRESHOLD", "1.0")   # only the budget
+    monkeypatch.setenv("IMAGE_MAX_NEW", "1")
+    _serve_generated(routes, story)
+
+    result = images.run_for(episode, story, SHORTS, open_url=open_url)
+    assert len(result["made"]) == 1, "the budget was ignored"
+    assert len(result["reused"]) == 2
+    # Every scene still has a picture: a spent budget reuses, it does
+    # not leave title cards.
+    for scene in story.scenes:
+        assert (episode.dir / "sources" / f"{scene.slug}.png").exists()
+
+
+def test_no_budget_means_every_scene_is_drawn(
+        local, episode, story, monkeypatch):
+    from pipeline.config import SHORTS
+
+    open_url, routes = local
+    monkeypatch.delenv("IMAGE_STYLE", raising=False)
+    monkeypatch.setenv("IMAGE_REUSE", "1")
+    monkeypatch.setenv("IMAGE_MAX_NEW", "0")
+    # Prompts with nothing in common, so nothing is reused for being
+    # similar and only the absent budget is under test.
+    for scene, prompt in zip(story.scenes,
+                             ("a monkey on a wall", "a woman asleep indoors",
+                              "a harbour at night"), strict=True):
+        scene.image_prompt = prompt
+    _serve_generated(routes, story)
+    result = images.run_for(episode, story, SHORTS, open_url=open_url)
+    assert len(result["made"]) == 3
+    assert result["reused"] == []
