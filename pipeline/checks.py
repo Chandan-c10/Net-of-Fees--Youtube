@@ -92,12 +92,72 @@ def levels(path: Path) -> tuple[float, float]:
     return float(rms.group(1)), float(peak.group(1))
 
 
+def window_level(path: Path, start: float, length: float) -> float:
+    """Mean level of one stretch of a longer file, in dBFS."""
+    proc = subprocess.run(
+        [ffmpeg(), "-v", "info", "-ss", f"{start:.3f}", "-t",
+         f"{max(0.05, length):.3f}", "-i", str(path),
+         "-af", "volumedetect", "-f", "null", "-"],
+        capture_output=True, text=True, timeout=300, check=False)
+    found = _RMS.search(proc.stderr)
+    if not found:
+        raise StageError(f"could not measure {start:.1f}s of {path.name}")
+    return float(found.group(1))
+
+
+def check_continuous_take(ep, m) -> list[Finding]:
+    """Every scene's stretch of the one take should contain speech.
+
+    A continuous take writes no per-scene files, so the per-scene check
+    has nothing to look at -- and anything left behind by an earlier
+    per-scene run is stale. Measuring the take over each scene's own
+    window asks the real question: was this line actually spoken?
+    """
+    out: list[Finding] = []
+    take = ep.final_audio
+    if not take.exists():
+        return [Finding("blocker", "take", "audio",
+                        "the continuous take is missing",
+                        f"run.py {m.id} --stage voice --force")]
+    try:
+        rms, _peak = levels(take)
+    except StageError as exc:
+        return [Finding("warning", "take", "audio", str(exc),
+                        "check the file by hand")]
+    if rms <= SILENT_RMS_DBFS:
+        return [Finding("blocker", "take", "audio",
+                        f"the whole take is silent ({rms:.0f} dBFS)",
+                        f"run.py {m.id} --stage voice --force")]
+
+    clock = 0.0
+    for scene in m.scenes:
+        length = scene.duration_sec or 0.0
+        if length <= 0:
+            continue
+        try:
+            level = window_level(take, clock, length)
+        except StageError as exc:
+            out.append(Finding("warning", "take", scene.slug, str(exc),
+                               "check the take by hand"))
+        else:
+            if level <= SILENT_RMS_DBFS:
+                out.append(Finding(
+                    "blocker", "take", scene.slug,
+                    f"this line is silent inside the take "
+                    f"({level:.0f} dBFS)",
+                    f"run.py {m.id} --stage voice --force"))
+        clock += length
+    return out
+
+
 def check_scene_audio(ep, m) -> list[Finding]:
     """Every scene should contain speech.
 
     The commonest silent failure in this pipeline: a voice engine that
     returns without error and writes nothing audible.
     """
+    if m.stage("voice").data.get("take") == "continuous":
+        return check_continuous_take(ep, m)
     out: list[Finding] = []
     for scene in m.scenes:
         path = ep.scene_audio(scene)

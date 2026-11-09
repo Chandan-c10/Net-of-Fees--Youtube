@@ -74,7 +74,7 @@ Every number in the script must appear in the data. This is where a wrong
 figure gets caught.
 
 ```bash
-python run.py 001 --approve-script     # voice → charts → captions → assemble
+python run.py 001 --approve-script     # voice → images → charts → captions → assemble
 ```
 
 Watch `episodes/001/out/video.mp4`, pick a thumbnail from `out/thumb_*.png`.
@@ -421,7 +421,7 @@ font paths and concat-list quoting all differ by platform.
 
 ```
 pipeline/          stages, manifest, scrub, platform support
-  stages/          export → script → scrub → voice → charts →
+  stages/          export → script → scrub → voice → images → charts →
                    captions → assemble → thumbnail → shorts → upload
   voices/          engine interface: silent (draft), kokoro, cloned
   recipes/         one query + one chart set + one script template

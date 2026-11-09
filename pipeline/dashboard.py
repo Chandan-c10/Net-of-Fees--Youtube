@@ -820,6 +820,13 @@ SETTING_GROUPS = (
     ("Voice reference", "Where your recordings live if not on this machine. "
                         "This link is a credential: it can clone your voice.",
      ("VOICE_REFERENCE_URL",)),
+    ("Pictures", "Each scene says what it should show; this decides who "
+                 "draws it. Tried in order, so a generator being down "
+                 "falls through to stock instead of a title card. A "
+                 "Creative Commons picture is credited in the description "
+                 "automatically. Set IMAGE_FETCH to 0 to place pictures "
+                 "in sources/ yourself.",
+     ("IMAGE_PROVIDERS", "IMAGE_FETCH", "IMAGE_STYLE", "IMAGE_LOCAL_URL")),
     ("Content", "Defaults for new episodes and the trend scan.",
      ("PROFILE", "SCRIPT_ENGINE", "GEMINI_API_KEY", "YOUTUBE_API_KEY",
       "TREND_REGION")),

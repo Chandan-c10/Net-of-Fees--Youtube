@@ -88,6 +88,21 @@ class VideoSpec:
 LONGFORM = VideoSpec(width=1920, height=1080)
 SHORTS = VideoSpec(width=1080, height=1920)
 
+
+def spec_for(profile) -> VideoSpec:
+    """The frame a profile renders into.
+
+    Asked of the profile rather than passed down, because the shape is a
+    property of the profile and the caller has no way to know it.
+    Defaulting to LONGFORM instead is how `run.py` came to refuse every
+    vertical episode with "profile does not support 16:9", and how a
+    vertical episode that did render came out graded as landscape.
+    """
+    try:
+        return LONGFORM if profile.visuals.supports("16:9") else SHORTS
+    except AttributeError:
+        return LONGFORM
+
 # Mastering chain. Loudness is normalised across the whole episode, never
 # per scene -- per-scene gain makes loudness jump between scenes.
 LOUDNESS_TARGET_LUFS = -16.0

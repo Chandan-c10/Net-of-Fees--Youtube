@@ -71,7 +71,11 @@ def test_zero_or_negative_is_refused():
 
 
 def test_a_planned_episode_is_not_due_before_its_slot():
-    plan = schedule.plan_releases(3, at("2026-11-04 10:00"))
+    # Planned from now rather than a fixed date. `is_due` compares
+    # against the real clock, so a frozen start eventually becomes the
+    # past and the test then asserts the opposite of what it means --
+    # which is exactly what happened on 2026-11-09.
+    plan = schedule.plan_releases(3)
     assert not schedule.is_due(plan[-1].isoformat())
 
 

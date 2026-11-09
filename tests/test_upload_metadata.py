@@ -253,3 +253,34 @@ def test_an_unknown_profile_falls_back_rather_than_crashing(manifest):
     manifest.profile = "nosuchprofile"
     assert upload._snippet_extras(manifest)["categoryId"] == \
         upload.FALLBACK_CATEGORY_ID
+
+
+# ---- a snapshot that carries no figures -------------------------------
+
+
+def test_a_recipe_name_without_its_figures_falls_back_to_the_title(
+        episode, manifest):
+    """A story episode's snapshot holds no numbers. The unguarded version
+    died with a bare KeyError on exactly that."""
+    import profiles
+    from pipeline.stages import metadata
+
+    episode.snapshot.write_text(json.dumps({"recipe": "incident_log"}))
+    manifest.title = "The debt nobody mentioned"
+    manifest.pass_gate_1()
+    metadata.run(episode, manifest, profiles.load("trading"))
+    written = json.loads((episode.dir / "metadata.json").read_text())
+    assert written["chosen_title"] == "The debt nobody mentioned"
+
+
+def test_no_figures_and_no_title_says_so_rather_than_crashing(
+        episode, manifest):
+    import profiles
+    from pipeline.errors import StageError
+    from pipeline.stages import metadata
+
+    episode.snapshot.write_text(json.dumps({"recipe": "incident_log"}))
+    manifest.title = ""
+    manifest.pass_gate_1()
+    with pytest.raises(StageError, match="no title"):
+        metadata.run(episode, manifest, profiles.load("trading"))

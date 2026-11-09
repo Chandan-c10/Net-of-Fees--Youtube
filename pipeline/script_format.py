@@ -7,6 +7,25 @@ A scene header looks like:
 `chart` names a visual spec key the profile must implement. `voice`
 overrides the episode default. Both are optional; a scene with no chart
 renders the profile's title card.
+
+A scene may also carry one picture directive, on its own line inside the
+scene:
+
+    [SCENE 3]
+
+    IMAGE: a man in his fifties on a village doorstep at dusk, head
+    lowered, exhausted; medium shot
+
+    He had not told anyone about the debt.
+
+It sits in the body rather than the header because a usable prompt is a
+sentence with commas and semicolons in it, and the header is a
+pipe-and-colon list that cannot hold one.
+
+The directive is removed from the narration. That is the whole reason it
+is parsed here rather than left for a later stage to strip: a line that
+reaches the voice engine gets read aloud, and "IMAGE: a man in his
+fifties" in the middle of a story is unrecoverable.
 """
 
 from __future__ import annotations
@@ -22,12 +41,17 @@ _ATTR = re.compile(r"(?P<key>[a-z_]+)\s*:\s*(?P<value>[^|]+)", re.IGNORECASE)
 
 KNOWN_ATTRS = frozenset({"chart", "voice", "type", "annotate"})
 
+# Matched case-insensitively, and only at the start of a line, so a
+# sentence that happens to contain the word image is still narration.
+IMAGE_LINE = re.compile(r"^\s*IMAGE\s*:\s*(?P<prompt>.+?)\s*$", re.IGNORECASE)
+
 
 @dataclass
 class ParsedScene:
     index: int
     text: str
     attrs: dict[str, str]
+    image: str = ""
 
 
 def parse_attrs(raw: str | None) -> dict[str, str]:
@@ -68,6 +92,15 @@ def parse(text: str) -> list[ParsedScene]:
             if line.strip():
                 preamble.append(line)
         else:
+            picture = IMAGE_LINE.match(line)
+            if picture:
+                if current.image:
+                    raise ValidationError(
+                        f"line {lineno}: scene {current.index} has two IMAGE "
+                        "lines. One scene is one picture; split the scene."
+                    )
+                current.image = picture.group("prompt")
+                continue
             body.append(line)
 
     if current is not None:
@@ -112,6 +145,7 @@ def to_scenes(parsed: list[ParsedScene], default_voice: str | None = None) -> li
                 index=p.index,
                 text=p.text,
                 visual_spec=spec,
+                image_prompt=p.image,
                 voice=p.attrs.get("voice", default_voice),
             )
         )
@@ -135,7 +169,10 @@ def render(scenes: list[Scene], title: str) -> str:
         if attrs:
             header += " | " + " | ".join(attrs)
         header += "]"
-        lines += [header, "", s.text, ""]
+        lines += [header, ""]
+        if s.image_prompt:
+            lines += [f"IMAGE: {s.image_prompt}", ""]
+        lines += [s.text, ""]
     return "\n".join(lines).rstrip() + "\n"
 
 

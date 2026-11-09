@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from pipeline import script_format
 from pipeline.errors import ValidationError
 from pipeline.script_format import parse, render, to_scenes, validate_against_snapshot
 
@@ -64,3 +65,56 @@ def test_a_profiles_charts_are_valid_keys(fixture_snapshot):
     import profiles
     scenes = to_scenes(parse("[SCENE 1 | chart: drag_ladder]\n41 percent gone."))
     validate_against_snapshot(scenes, fixture_snapshot, profiles.load("trading"))
+
+
+# ---- the picture directive --------------------------------------------
+
+
+def test_an_image_line_is_parsed_and_kept_out_of_the_narration():
+    """The directive must never reach the voice engine.
+
+    A line left in the body gets read aloud, and "IMAGE: a man in his
+    fifties" in the middle of a story is unrecoverable.
+    """
+    scenes = script_format.to_scenes(script_format.parse(
+        "[SCENE 1]\n\n"
+        "IMAGE: a man on a doorstep at dusk, head lowered; medium shot\n\n"
+        "He had not told anyone about the debt.\n"))
+    assert scenes[0].text == "He had not told anyone about the debt."
+    assert "IMAGE" not in scenes[0].text
+    assert scenes[0].image_prompt.startswith("a man on a doorstep")
+
+
+def test_the_directive_is_case_insensitive():
+    scenes = script_format.to_scenes(script_format.parse(
+        "[SCENE 1]\n\nimage: eleven coins, close up\n\nEleven coins.\n"))
+    assert scenes[0].image_prompt == "eleven coins, close up"
+
+
+def test_the_word_image_inside_a_sentence_is_still_narration():
+    scenes = script_format.to_scenes(script_format.parse(
+        "[SCENE 1]\n\nThe image of him stayed with her.\n"))
+    assert scenes[0].text == "The image of him stayed with her."
+    assert scenes[0].image_prompt == ""
+
+
+def test_two_image_lines_in_one_scene_are_refused():
+    with pytest.raises(ValidationError, match="two IMAGE"):
+        script_format.parse(
+            "[SCENE 1]\n\nIMAGE: a doorstep\nIMAGE: a table\n\nA line.\n")
+
+
+def test_a_scene_of_only_an_image_line_has_no_narration():
+    """Stripping the directive must not turn a real error into silence."""
+    with pytest.raises(ValidationError, match="no narration"):
+        script_format.parse("[SCENE 1]\n\nIMAGE: a doorstep at dusk\n")
+
+
+def test_a_picture_script_survives_a_round_trip():
+    original = script_format.to_scenes(script_format.parse(
+        "[SCENE 1]\n\nIMAGE: a doorstep at dusk; wide shot\n\nOne.\n\n"
+        "[SCENE 2 | voice: chandan_en]\n\nIMAGE: coins, close up\n\nTwo.\n"))
+    again = script_format.to_scenes(
+        script_format.parse(script_format.render(original, "T")))
+    assert [(s.text, s.image_prompt) for s in again] == \
+           [(s.text, s.image_prompt) for s in original]

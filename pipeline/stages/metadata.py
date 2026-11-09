@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 
+from .. import images
 from ..errors import StageError
 from ..logging_setup import get
 from ..manifest import Episode, Manifest
@@ -61,12 +62,25 @@ class TitleCandidate:
                 self.warnings.append(f"ADVISORY LANGUAGE: {phrase!r} -- not allowed")
 
 
+def _has(data: dict, *keys: str) -> bool:
+    """Whether the snapshot carries every figure a title needs.
+
+    Checked rather than assumed: a recipe name in the snapshot is not a
+    promise that the snapshot has that recipe's fields, and the
+    unguarded version died with a bare KeyError on a story episode whose
+    data holds no figures at all.
+    """
+    return all(key in data for key in keys)
+
+
 def _titles(data: dict, m: Manifest) -> list[TitleCandidate]:
     """Build candidates from figures in the snapshot. Never invents one."""
     out: list[TitleCandidate] = []
     recipe = data.get("recipe")
 
-    if recipe == "incident_log":
+    if recipe == "incident_log" and _has(
+            data, "total", "caught_by_tests", "median_days_hidden",
+            "serious"):
         out += [
             TitleCandidate(
                 f"{data['total']} bugs. My tests caught {data['caught_by_tests']}.",
@@ -81,7 +95,7 @@ def _titles(data: dict, m: Manifest) -> list[TitleCandidate]:
                 "stakes stated plainly",
             ),
         ]
-    elif recipe == "fee_drag":
+    elif recipe == "fee_drag" and _has(data, "breakeven_points", "drag_pct"):
         out += [
             TitleCandidate(
                 f"{data['breakeven_points']} points before you earn anything",
@@ -97,11 +111,19 @@ def _titles(data: dict, m: Manifest) -> list[TitleCandidate]:
             ),
         ]
     else:
-        out.append(TitleCandidate(m.title or data.get("title", ""), "fallback"))
+        title = m.title or data.get("title", "")
+        if not title.strip():
+            raise StageError(
+                "no title: the snapshot carries none of this recipe's "
+                f"figures ({sorted(data)}) and the episode has no title "
+                "of its own. Set a title, or re-run the export stage."
+            )
+        out.append(TitleCandidate(title, "fallback"))
     return out
 
 
-def _description(data: dict, m: Manifest, profile, hook: str) -> str:
+def _description(data: dict, m: Manifest, profile, hook: str,
+                 credits: list[str] | None = None) -> str:
     parts = [hook, ""]
     if m.series:
         n = f" (episode {m.series_episode})" if m.series_episode else ""
@@ -119,6 +141,12 @@ def _description(data: dict, m: Manifest, profile, hook: str) -> str:
             "time of recording. Your own numbers will differ.",
             "",
         ]
+    # Creative Commons pictures have to be credited where the video is
+    # published. Not a nicety: using one without the credit breaches the
+    # licence, and the description is the only place it fits.
+    if credits:
+        parts += [*credits, ""]
+
     parts += [profile.style.DISCLAIMER, ""]
     parts.append(" ".join(hashtags(data, profile)))
     return "\n".join(parts)
@@ -130,7 +158,7 @@ def hashtags(data: dict, profile, limit: int = 12) -> list[str]:
     recipe = data.get("recipe")
     if recipe == "incident_log":
         tags = ["#postmortem", "#debugging", *tags]
-    elif recipe == "fee_drag":
+    elif recipe == "fee_drag" and _has(data, "breakeven_points", "drag_pct"):
         tags = ["#tradingcosts", "#optionstrading", *tags]
     seen, out = set(), []
     for t in tags:
@@ -161,6 +189,9 @@ def run(ep: Episode, m: Manifest, profile) -> dict:
     if blocking:
         raise StageError("title candidates contain advisory language: " + "; ".join(blocking))
 
+    # The same credits on every surface the video appears on: a licence
+    # term does not stop applying because the post is shorter.
+    credits = images.attribution_lines(ep)
     hook = m.scenes[0].text.split(".")[0].strip() + "."
     chosen = next((c for c in candidates if not c.warnings), candidates[0])
 
@@ -169,14 +200,17 @@ def run(ep: Episode, m: Manifest, profile) -> dict:
         "title_candidates": [asdict(c) for c in candidates],
         "youtube": {
             "title": chosen.text[:100],
-            "description": _description(data, m, profile, hook),
+            "description": _description(data, m, profile, hook, credits),
             "tags": [t.lstrip("#") for t in hashtags(data, profile)],
         },
         "shorts": {
             "title": chosen.text[:SHORTS_TITLE_MAX],
-            "description": " ".join(hashtags(data, profile, limit=6)),
+            "description": "\n".join(
+                [" ".join(hashtags(data, profile, limit=6)), *credits]
+            ).strip(),
         },
-        "instagram": {"caption": _instagram_caption(hook, data, profile)},
+        "instagram": {"caption": "\n".join(
+            [_instagram_caption(hook, data, profile), *credits]).strip()},
     }
     path = ep.dir / "metadata.json"
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

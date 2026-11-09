@@ -146,14 +146,56 @@ decide what a trade is worth. Net of fees is the only figure that counts.
 # ---- LLM engines -------------------------------------------------------
 
 
+
+# What a model has to be told to write a usable picture prompt.
+#
+# Every rule here exists because its absence produced something wrong on
+# screen: smiling faces over a line about illness, a character who
+# changed age between scenes, five consecutive close-ups, a subject on
+# bare ground with nothing behind it.
+PICTURE_CONTRACT = """
+PICTURES
+
+Give every scene exactly one IMAGE line, under the scene header and
+above the narration:
+
+    IMAGE: <what the viewer sees>
+
+- Describe what is visible, not what it means. "a boy counting coins on
+  a doorstep" can be drawn; "the weight of his debt" cannot.
+- Name the feeling in the face and the posture, and match it to the line
+  being read. A smiling face over a line about illness is the one
+  mistake every viewer notices.
+- Re-describe each recurring person in full every time -- age, build,
+  hair, clothing. Nothing remembers scene 2 while drawing scene 7, so a
+  character stays the same person only if every prompt says who they are.
+- Name the shot: close-up, medium shot, wide shot. Vary it. Consecutive
+  close-ups are what makes a sequence feel like a slideshow.
+- Name the place and the light: inside or outside, time of day, weather.
+  A subject against empty ground reads as dead on screen.
+- No words, letters, signs or logos in the picture.
+- No real named people and no brands.
+- One or two clauses, under forty words.
+"""
+
+def wants_picture_prompts(profile) -> bool:
+    """Whether this profile's frames are pictures rather than charts.
+
+    The same attribute assemble and the images stage dispatch on, so a
+    profile cannot be asked for prompts it has no use for.
+    """
+    return getattr(profile, "MOTION", None) == "kenburns"
+
+
 def _prompt(m: Manifest, data: dict, profile) -> str:
     template = ""
     if profile is not None:
         tpl = Path(profile.__path__[0]) / "script.md"
         if tpl.exists():
             template = tpl.read_text(encoding="utf-8")
+    pictures = PICTURE_CONTRACT if wants_picture_prompts(profile) else ""
     return f"""{template}
-
+{pictures}
 TITLE: {m.title}
 
 DATA (the only facts you may use; never invent a number):

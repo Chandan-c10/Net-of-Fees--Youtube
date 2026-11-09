@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import profiles
 from pipeline import channels, config, dashboard, gates, logging_setup, notify, recovery, trends
+from pipeline.config import spec_for
 from pipeline.errors import ConfigError, PipelineError
 from pipeline.manifest import PUBLISH_STAGES, STAGES, Episode, Manifest
 from pipeline.recipes import available as available_recipes
@@ -38,6 +39,7 @@ from pipeline.stages import (
     charts,
     export,
     finish,
+    images,
     instagram,
     metadata,
     script_gen,
@@ -82,6 +84,10 @@ def _next_id() -> str:
 
 def _run_stage(name: str, ep: Episode, m: Manifest, settings, args) -> None:
     profile = profiles.load(m.profile)
+    # The frame comes from the profile. Every render stage needs it, and
+    # letting each default to LONGFORM is what made vertical episodes
+    # unrunnable from the CLI.
+    spec = spec_for(profile)
     if name == "export":
         params = json.loads(args.params) if args.params else {}
         export.run(ep, m, params)
@@ -95,8 +101,11 @@ def _run_stage(name: str, ep: Episode, m: Manifest, settings, args) -> None:
         if getattr(args, "voice", None):
             m.voice = args.voice
         voice.run(ep, m, engine_name=args.voice_engine)
+    elif name == "images":
+        images.run(ep, m, profile,
+                   force=getattr(args, "refetch_images", False))
     elif name == "charts":
-        charts.run(ep, m, profile)
+        charts.run(ep, m, profile, spec)
     elif name == "captions":
         captions.run(ep, m, method=args.captions)
     elif name == "assemble":
@@ -105,11 +114,12 @@ def _run_stage(name: str, ep: Episode, m: Manifest, settings, args) -> None:
         # overlaid captions rather than stills with captions baked in.
         if getattr(profile, "MOTION", None) == "kenburns":
             from pipeline.stages import motion_assemble
-            motion_assemble.run(ep, m, burn_captions=not args.no_captions,
+            motion_assemble.run(ep, m, spec,
+                                burn_captions=not args.no_captions,
                                 profile=profile, music=not args.no_music,
                                 ambient=not args.no_ambience)
         else:
-            assemble.run(ep, m, burn_captions=not args.no_captions,
+            assemble.run(ep, m, spec, burn_captions=not args.no_captions,
                          profile=profile, animate=not args.no_animate,
                          dissolve=not args.no_dissolve,
                          music=not args.no_music)
@@ -824,6 +834,13 @@ def main(argv: list[str] | None = None) -> int:
         rp.add_argument("--from", dest="start", choices=STAGES)
         rp.add_argument("--stage", choices=STAGES)
         rp.add_argument("--force", action="store_true")
+        # Separate from --force on purpose. --force means re-run the
+        # stage; re-running the images stage keeps the pictures it
+        # already has, because discarding eleven good ones to re-run a
+        # later stage is never what was meant -- and on a free
+        # generator those are eleven requests you may not get back.
+        rp.add_argument("--refetch-images", action="store_true",
+                        help="draw every scene picture again")
         rp.add_argument("--approve-script", action="store_true")
         rp.add_argument("--approve", action="store_true")
         rp.add_argument("--publish", action="store_true")

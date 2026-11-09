@@ -259,3 +259,27 @@ def test_the_publishing_folder_holds_only_the_deliverable(tmp_path, manifest):
 
     videos = sorted(p.name for p in ep.out_dir.glob("*.mp4"))
     assert videos == ["video.mp4"], f"out/ also contains {videos}"
+
+
+# ---- the frame comes from the profile ---------------------------------
+
+
+def test_a_vertical_profile_gets_a_vertical_frame():
+    """`run.py` defaulted every stage to LONGFORM, which made a vertical
+    episode fail at charts with "does not support 16:9" and graded the
+    ones that did render as landscape."""
+    import profiles
+    from pipeline.config import LONGFORM, SHORTS, spec_for
+
+    assert spec_for(profiles.load("storyboard_shorts")) == SHORTS
+    assert spec_for(profiles.load("storyboard")) == LONGFORM
+    assert spec_for(profiles.load("trading")) == LONGFORM
+
+
+def test_a_profile_that_cannot_be_asked_falls_back_to_landscape():
+    from pipeline.config import LONGFORM, spec_for
+
+    class Bare:
+        pass
+
+    assert spec_for(Bare()) == LONGFORM

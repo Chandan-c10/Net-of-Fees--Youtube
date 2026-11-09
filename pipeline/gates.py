@@ -75,10 +75,32 @@ def gate_1_blockers(ep: Episode, m: Manifest) -> list[str]:
         import profiles
 
         from .script_format import validate_against_snapshot
+        profile = profiles.load(m.profile)
         data = json.loads(ep.snapshot.read_text(encoding="utf-8"))
-        validate_against_snapshot(m.scenes, data, profiles.load(m.profile))
+        validate_against_snapshot(m.scenes, data, profile)
     except Exception as exc:
         out.append(f"script does not match the data: {exc}")
+        return out
+
+    # A picture profile with no IMAGE lines renders typographic cards.
+    # That is correct behaviour for a missing picture and a bad episode,
+    # and it is invisible at approval time unless it is said here --
+    # the script reads fine, and the cards only appear after the render.
+    from .stages.script_gen import wants_picture_prompts
+    if wants_picture_prompts(profile):
+        # A hand-placed picture is as good as a prompt: it is the
+        # picture, and asking for a prompt to describe a file that
+        # already exists would be busywork.
+        sources = ep.dir / "sources"
+        bare = [s.index for s in m.scenes
+                if not (s.image_prompt or "").strip()
+                and not (sources / f"{s.slug}.png").exists()]
+        if bare:
+            out.append(
+                f"scenes with neither an IMAGE line nor a picture: {bare}. "
+                "These would render as title cards. Add an IMAGE line to "
+                "each, or place a picture at sources/scene_NN.png."
+            )
     return out
 
 

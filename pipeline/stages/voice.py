@@ -89,6 +89,13 @@ def _narrate_continuously(ep: Episode, m: Manifest, engine, lexicons,
     spans = continuous.narrate(
         engine, _Lines(spoken).items, ep.final_audio, m.id, log)
 
+    # Per-scene files from an earlier per-scene run are stale the moment
+    # a take exists, and a stale file is not inert: a silent scene_01.wav
+    # left by the draft engine made `run.py check` report fourteen silent
+    # scenes over an episode whose audio was fine.
+    for scene in m.scenes:
+        ep.scene_audio(scene).unlink(missing_ok=True)
+
     for scene, span in zip(m.scenes, spans, strict=True):
         scene.duration_sec = round(span.duration, 3)
     total = sum(s.duration_sec for s in m.scenes)

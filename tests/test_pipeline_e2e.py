@@ -166,3 +166,49 @@ def test_every_cli_subcommand_parses():
         )
         assert proc.returncode == 0, f"{command}: {proc.stderr}"
         assert "Traceback" not in proc.stderr, f"{command}: {proc.stderr}"
+
+
+def test_force_rerunning_a_stage_does_not_discard_the_pictures(tmp_path,
+                                                               monkeypatch):
+    """--force means re-run the stage. Re-running a later stage must not
+    throw away eleven generated pictures -- on a free generator those are
+    eleven requests you may not get back, which is why refetching has a
+    flag of its own."""
+    import argparse
+
+    import run as cli
+    from pipeline.manifest import Episode, Manifest, Scene
+
+    seen = {}
+
+    def fake_run(ep, m, profile, spec=None, force=False):
+        seen["force"] = force
+        return {"made": [], "kept": []}
+
+    monkeypatch.setattr(cli.images, "run", fake_run)
+    m = Manifest.new("777", recipe="fee_drag", profile="storyboard_shorts",
+                     title="T")
+    m.scenes = [Scene(index=1, text="One.", image_prompt="a doorstep")]
+    ep = Episode(m.id, tmp_path)
+    ep.ensure_dirs()
+
+    args = argparse.Namespace(force=True, refetch_images=False, params=None)
+    cli._run_stage("images", ep, m, None, args)
+    assert seen["force"] is False, "--force refetched every picture"
+
+    args.refetch_images = True
+    cli._run_stage("images", ep, m, None, args)
+    assert seen["force"] is True
+
+
+def test_the_refetch_flag_exists_on_the_run_parser():
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    proc = subprocess.run(
+        [sys.executable, str(root / "run.py"), "999", "--help"],
+        capture_output=True, text=True, cwd=str(root), timeout=60,
+        check=False)
+    assert "--refetch-images" in proc.stdout

@@ -37,7 +37,7 @@ def _font(px: int):
     return ImageFont.load_default()
 
 
-def _headlines(data: dict) -> list[tuple[str, str]]:
+def _headlines(data: dict, title: str = "") -> list[tuple[str, str]]:
     """Candidate (focal, supporting) pairs, drawn from the snapshot only.
 
     One focal number, four words of support. Anything longer is unreadable
@@ -46,7 +46,14 @@ def _headlines(data: dict) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     recipe = data.get("recipe")
 
-    if recipe == "incident_log":
+    # Guarded, like the fee_drag branch below it: a recipe name in the
+    # snapshot is not a promise that the snapshot has that recipe's
+    # fields, and the unguarded version died with a bare KeyError on a
+    # story episode whose data carries no figures.
+    if recipe == "incident_log" and all(
+            key in data for key in
+            ("median_days_hidden", "caught_by_tests", "total",
+             "max_days_hidden")):
         out += [
             (f"{data['median_days_hidden']:.0f}", "days before I noticed"),
             (f"{data['caught_by_tests']}/{data['total']}", "caught by tests"),
@@ -61,7 +68,10 @@ def _headlines(data: dict) -> list[tuple[str, str]]:
         if ladder and ladder[0].get("drag_pct") is not None:
             out.append((f"{ladder[0]['drag_pct']}%", "on a small win"))
     if not out:
-        out.append(("?", data.get("title", "")[:28]))
+        # No figure to lead with, so the title carries the card. "?" as a
+        # focal number is deliberate: it reads as a question, which is
+        # what a story episode's thumbnail is.
+        out.append(("?", (data.get("title") or title)[:28]))
     return out[:3]
 
 
@@ -154,7 +164,7 @@ def run(ep: Episode, m: Manifest, profile) -> list[Path]:
     style = profile.style
 
     made: list[Path] = []
-    for i, (focal, support) in enumerate(_headlines(data), start=1):
+    for i, (focal, support) in enumerate(_headlines(data, m.title), start=1):
         p = _render(focal, support, ep.thumbnail(i), style,
                     m.series, m.series_episode, m.title)
         legible = check_small_legibility(p)

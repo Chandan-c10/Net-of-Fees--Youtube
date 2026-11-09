@@ -21,6 +21,7 @@ STAGES: tuple[str, ...] = (
     "script",
     "scrub",
     "voice",
+    "images",
     "charts",
     "captions",
     "assemble",
@@ -32,7 +33,7 @@ STAGES: tuple[str, ...] = (
 )
 
 # Stages that may not run until the named gate has been cleared.
-GATE_1_STAGES = ("voice", "charts", "captions", "assemble",
+GATE_1_STAGES = ("voice", "images", "charts", "captions", "assemble",
                  "metadata", "thumbnail")
 GATE_2_STAGES = ("shorts", "upload", "instagram")
 

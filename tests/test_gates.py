@@ -167,3 +167,45 @@ def test_the_gate_workflows_are_manual_only(name):
     triggers = set(spec.get(True, spec.get("on", {})))
     assert triggers == {"workflow_dispatch"}, \
         f"{name} clears a gate, so it must be manual only; got {triggers}"
+
+
+# ---- a picture script has to say what the pictures are ----------------
+
+
+def _storyboard(manifest):
+    """The same episode, told as a picture profile."""
+    manifest.profile = "storyboard_shorts"
+    manifest.mark_done("script", scenes=len(manifest.scenes))
+    manifest.mark_done("scrub", findings=0)
+    return manifest
+
+
+def test_a_picture_scene_with_no_image_line_blocks_gate_1(episode, manifest):
+    """Otherwise the cards only appear after the render, long after the
+    approval that could have caught them."""
+    _storyboard(manifest)
+    blockers = gates.gate_1_blockers(episode, manifest)
+    assert any("neither an IMAGE line nor a picture" in b for b in blockers)
+
+
+def test_image_lines_on_every_scene_clear_it(episode, manifest):
+    _storyboard(manifest)
+    for scene in manifest.scenes:
+        scene.image_prompt = f"a doorstep at dusk, scene {scene.index}"
+    assert gates.gate_1_blockers(episode, manifest) == []
+
+
+def test_a_hand_placed_picture_counts_instead_of_a_prompt(episode, manifest):
+    _storyboard(manifest)
+    sources = episode.dir / "sources"
+    sources.mkdir(parents=True, exist_ok=True)
+    for scene in manifest.scenes:
+        (sources / f"{scene.slug}.png").write_bytes(b"not read here")
+    assert gates.gate_1_blockers(episode, manifest) == []
+
+
+def test_a_chart_profile_is_not_asked_for_image_lines(episode, manifest):
+    manifest.mark_done("script", scenes=3)
+    manifest.mark_done("scrub", findings=0)
+    blockers = gates.gate_1_blockers(episode, manifest)
+    assert not any("IMAGE" in b for b in blockers)
