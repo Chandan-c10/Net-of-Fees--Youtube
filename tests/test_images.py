@@ -143,7 +143,12 @@ def test_the_default_is_generation_only(monkeypatch):
     Hubble photograph in a village story. A wrong picture looks
     deliberate; a missing one shows a card and gets reported."""
     monkeypatch.delenv("IMAGE_PROVIDERS", raising=False)
-    assert images.providers() == ("pollinations",)
+    chain = images.providers()
+    assert "openverse" not in chain
+    assert "pollinations" in chain
+    # Every generator, because an unconfigured one refuses on a function
+    # call rather than a request, so listing it costs nothing.
+    assert set(chain) <= set(images.PROVIDERS)
 
 
 def test_stock_is_one_setting_away(monkeypatch):
@@ -601,7 +606,7 @@ def test_the_stage_fills_sources_for_a_storyboard(
     monkeypatch.setattr(images, "_open", open_url)
     result = stage.run(episode, story, profile)
     assert len(result["made"]) == 3
-    assert story.stage("images").data["providers"] == ["pollinations"]
+    assert "pollinations" in story.stage("images").data["providers"]
 
 
 def test_a_vertical_profile_asks_for_a_vertical_picture():
@@ -695,6 +700,7 @@ def test_scenes_are_paced_apart(episode, story, local, monkeypatch):
     open_url, routes = local
     monkeypatch.delenv("IMAGE_STYLE", raising=False)
     monkeypatch.setenv("IMAGE_PACE_SEC", "0.05")
+    monkeypatch.setenv("IMAGE_WORKERS", "1")
     _serve_generated(routes, story)
     waits = []
     monkeypatch.setattr(images.time, "sleep", waits.append)

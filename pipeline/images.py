@@ -31,6 +31,7 @@ import hashlib
 import json
 import os
 import re
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -95,7 +96,12 @@ FREE_PIXEL_CAP = {"pollinations": 589_824}
 #
 # Stock remains one setting away for anyone who wants it:
 #   IMAGE_PROVIDERS=pollinations,openverse
-DEFAULT_PROVIDERS = ("pollinations",)
+# Everything that can draw, in the order worth trying. Each refuses
+# immediately and cheaply when its credentials are absent, so an
+# unconfigured provider costs a function call rather than a request --
+# which means listing them all by default is free, and configuring one
+# later needs no change here.
+DEFAULT_PROVIDERS = ("cloudflare", "together", "huggingface", "pollinations")
 
 # Appended to every prompt so a single episode's pictures look like they
 # came from one hand. Overridable per profile and per run.
@@ -163,6 +169,15 @@ def style_suffix(profile=None) -> str:
     if env:
         return env
     return getattr(profile, "IMAGE_STYLE", DEFAULT_STYLE)
+
+
+def workers() -> int:
+    """How many scenes to draw at the same time."""
+    try:
+        return max(1, min(8, int(os.getenv("IMAGE_WORKERS",
+                                           str(DEFAULT_WORKERS)))))
+    except ValueError:
+        return DEFAULT_WORKERS
 
 
 def pace_sec() -> float:
@@ -268,6 +283,16 @@ BACKOFF_SEC = (5.0, 15.0, 30.0, 60.0)
 # A gap between scenes, for the same reason. Being the caller who sends
 # fourteen requests in four seconds is how you get refused.
 DEFAULT_PACE_SEC = 8.0
+
+# How many scenes to draw at once.
+#
+# One at a time, a sixteen-scene episode spends twenty minutes waiting
+# on a server rather than working. Several at once is not a way to get
+# more out of one busy endpoint -- it is a way to use several at the
+# same time, which is why it arrived with the providers rather than
+# before them. Kept low on purpose: the point is to overlap the waiting,
+# not to flood anyone.
+DEFAULT_WORKERS = 3
 
 
 def _open(url: str, data: bytes | None = None,
@@ -495,7 +520,114 @@ def from_local(prompt: str, width: int, height: int, seed: int,
         "provider": "local", "license": "generated", "source_url": ""}
 
 
+def from_cloudflare(prompt: str, width: int, height: int, seed: int,
+                    open_url=None) -> tuple[bytes, dict]:
+    """Workers AI, on the account you already have.
+
+    Ten thousand neurons a day at no charge, and flux-1-schnell costs a
+    few each: hundreds of pictures a day rather than the handful a free
+    public endpoint will spare. No watermark, and the credentials are
+    an API token from the same dashboard as the storage.
+
+    Needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_AI_TOKEN. Absent either,
+    it says so and the chain moves on.
+    """
+    import base64
+
+    account = (os.getenv("CLOUDFLARE_ACCOUNT_ID")
+               or os.getenv("R2_ACCOUNT_ID") or "").strip()
+    token = os.getenv("CLOUDFLARE_AI_TOKEN", "").strip()
+    if not account or not token:
+        raise StageError(
+            "cloudflare needs CLOUDFLARE_AI_TOKEN (and an account id; "
+            "R2_ACCOUNT_ID is used if it is the same account)"
+        )
+    model = os.getenv("CLOUDFLARE_IMAGE_MODEL",
+                      "@cf/black-forest-labs/flux-1-schnell")
+    url = (f"https://api.cloudflare.com/client/v4/accounts/{account}"
+           f"/ai/run/{model}")
+    payload = json.dumps({"prompt": prompt, "seed": seed % 4294967295}).encode()
+    body, _kind = _open_patiently(
+        open_url, url, payload,
+        {"Authorization": f"Bearer {token}",
+         "Content-Type": "application/json"})
+    try:
+        answer = json.loads(body)
+    except ValueError as exc:
+        raise StageError("cloudflare returned something that is not JSON"
+                         ) from exc
+    if not answer.get("success", True):
+        errors = answer.get("errors") or [{}]
+        raise StageError(f"cloudflare refused: "
+                         f"{errors[0].get('message', 'no reason given')}")
+    # flux-1-schnell answers with base64 in `result.image`; some models
+    # answer with the bytes directly.
+    encoded = (answer.get("result") or {}).get("image")
+    if not encoded:
+        raise StageError("cloudflare returned no image")
+    return base64.b64decode(encoded), {
+        "provider": "cloudflare", "license": "generated", "source_url": ""}
+
+
+def from_huggingface(prompt: str, width: int, height: int, seed: int,
+                     open_url=None) -> tuple[bytes, dict]:
+    """The Inference API, on a free account token.
+
+    Rate limited rather than refused, which makes it a good second
+    source: it is slow when busy instead of saying no.
+    """
+    token = os.getenv("HUGGINGFACE_TOKEN", "").strip()
+    if not token:
+        raise StageError("huggingface needs HUGGINGFACE_TOKEN")
+    model = os.getenv("HUGGINGFACE_IMAGE_MODEL",
+                      "black-forest-labs/FLUX.1-schnell")
+    payload = json.dumps({"inputs": prompt}).encode()
+    body, kind = _open_patiently(
+        open_url, f"https://api-inference.huggingface.co/models/{model}",
+        payload, {"Authorization": f"Bearer {token}",
+                  "Content-Type": "application/json"})
+    if not body.startswith((b"\x89PNG", b"\xff\xd8\xff", b"RIFF")):
+        raise StageError(f"huggingface returned {kind or 'no content type'} "
+                         "rather than an image")
+    return body, {"provider": "huggingface", "license": "generated",
+                  "source_url": ""}
+
+
+def from_together(prompt: str, width: int, height: int, seed: int,
+                  open_url=None) -> tuple[bytes, dict]:
+    """Together.ai, which has a free FLUX-schnell tier."""
+    import base64
+
+    token = os.getenv("TOGETHER_API_KEY", "").strip()
+    if not token:
+        raise StageError("together needs TOGETHER_API_KEY")
+    model = os.getenv("TOGETHER_IMAGE_MODEL",
+                      "black-forest-labs/FLUX.1-schnell-Free")
+    payload = json.dumps({
+        "model": model, "prompt": prompt,
+        "width": _dim(width), "height": _dim(height),
+        "steps": 4, "n": 1, "response_format": "b64_json",
+    }).encode()
+    body, _kind = _open_patiently(
+        open_url, "https://api.together.xyz/v1/images/generations", payload,
+        {"Authorization": f"Bearer {token}",
+         "Content-Type": "application/json"})
+    try:
+        rows = json.loads(body).get("data") or []
+    except ValueError as exc:
+        raise StageError("together returned something that is not JSON"
+                         ) from exc
+    encoded = rows[0].get("b64_json") if rows else None
+    if not encoded:
+        raise StageError("together returned no image")
+    return base64.b64decode(encoded), {
+        "provider": "together", "license": "generated", "source_url": ""}
+
+
 PROVIDERS = {
+    "cloudflare": from_cloudflare,
+    "huggingface": from_huggingface,
+    "together": from_together,
     "pollinations": from_pollinations,
     "openverse": from_openverse,
     "local": from_local,
@@ -677,6 +809,8 @@ def run_for(ep, m, spec, profile=None, force: bool = False,
     # rather than to the whole library, so a scene that runs out of
     # budget still gets a picture from its own story.
     mine: list[image_library.Entry] = []
+    todo: list[tuple] = []
+    spill: list[tuple] = []
     for scene in m.scenes:
         out = sources / f"scene_{scene.index:02d}.png"
         if out.exists() and not force:
@@ -691,11 +825,12 @@ def run_for(ep, m, spec, profile=None, force: bool = False,
         # than one man seen four ways.
         raw = (getattr(scene, "image_prompt", "") or "").strip()
         match = image_library.find(raw, shelf) if raw else None
-        if not match and raw and budget and len(made) >= budget and mine:
-            # The budget is spent. Reuse the nearest picture this
-            # episode already has rather than drawing another or
-            # leaving a title card.
-            match = image_library.closest(raw, mine)
+        if not match and raw and budget and len(todo) >= budget:
+            # The budget is spent. Held back rather than resolved now:
+            # nothing has been drawn yet, so there is nothing of this
+            # episode's own to reuse until the pass below has run.
+            spill.append((scene, out, raw))
+            continue
         if match:
             entry, score = match
             image_library.reuse(entry, out)
@@ -707,48 +842,85 @@ def run_for(ep, m, spec, profile=None, force: bool = False,
             log.info(f"{scene.slug} <- library ({score:.0%} match)")
             continue
 
-        if sent and pace:
-            time.sleep(pace)
-        sent += 1
-        try:
-            credit = fetch_one(
-                prompt_for(scene, profile), out, width, height,
-                seed_for(m.id, scene.index), open_url=open_url, log=log)
-        except StageError as exc:
-            # Not fatal: the visuals stage renders a card for a missing
-            # picture, so one unavailable scene costs one frame rather
-            # than the episode.
-            failed[scene.slug] = str(exc)
-            log.warning(f"{scene.slug}: {exc}")
-            if out.exists():
-                # A redraw that failed leaves the previous picture in
-                # place, which is worth keeping and dangerous to be
-                # quiet about: eight scenes of an episode stayed on
-                # pictures from a provider that had since been removed
-                # from the chain, and nothing said so.
-                stale.append(out.name)
-                rows.append(existing.get(scene.index) or Credit(
-                    scene.index, "supplied", "unknown"))
-                log.warning(f"{scene.slug} still shows the previous "
-                            f"picture; delete {out.name} to force a card")
+        todo.append((scene, out, raw))
+
+    # Everything left needs drawing. Done several at a time, because
+    # each one is almost entirely waiting: the pace between requests is
+    # kept per worker so the politeness survives the parallelism.
+    if todo:
+        import concurrent.futures as cf
+
+        lock = threading.Lock()
+        pool = workers()
+
+        def draw(job):
+            scene, out, raw = job
+            with lock:
+                nonlocal sent
+                wait = pace if sent else 0.0
+                sent += 1
+            if wait:
+                time.sleep(wait * (1.0 / max(1, pool)))
+            try:
+                credit = fetch_one(
+                    prompt_for(scene, profile), out, width, height,
+                    seed_for(m.id, scene.index), open_url=open_url, log=log)
+            except StageError as exc:
+                return scene, out, raw, None, exc
+            return scene, out, raw, credit, None
+
+        with cf.ThreadPoolExecutor(max_workers=pool) as runner:
+            results = list(runner.map(draw, todo))
+
+        for scene, out, raw, credit, exc in results:
+            if exc is not None:
+                # Not fatal: the visuals stage renders a card for a
+                # missing picture, so one unavailable scene costs one
+                # frame rather than the episode.
+                failed[scene.slug] = str(exc)
+                log.warning(f"{scene.slug}: {exc}")
+                if out.exists():
+                    # A redraw that failed leaves the previous picture
+                    # in place, which is worth keeping and dangerous to
+                    # be quiet about.
+                    stale.append(out.name)
+                    rows.append(existing.get(scene.index) or Credit(
+                        scene.index, "supplied", "unknown"))
+                    log.warning(f"{scene.slug} still shows the previous "
+                                f"picture; delete {out.name} to force a card")
+                continue
+            rows.append(Credit(scene.index, credit.provider, credit.license,
+                               credit.source_url, credit.creator,
+                               credit.native))
+            made.append(out.name)
+            drawn = credit.native.split("x")
+            if drawn and drawn[0].isdigit() and int(drawn[0]) < spec.width:
+                log.info(f"{scene.slug} <- {credit.provider} at "
+                         f"{credit.native}, scaled up to fill the frame")
+            else:
+                log.info(f"{scene.slug} <- {credit.provider} "
+                         f"({credit.native})")
+            if raw and image_library.enabled():
+                entry = image_library.add(raw, out, asdict(credit),
+                                          credit.native)
+                shelf.append(entry)
+                mine.append(entry)
+
+    # Scenes held back by the budget, now that this episode has
+    # pictures of its own to reuse.
+    for scene, out, raw in spill:
+        match = image_library.closest(raw, mine) if mine else None
+        if not match:
+            failed[scene.slug] = ("held back by IMAGE_MAX_NEW, and nothing "
+                                  "was drawn to reuse")
             continue
-        rows.append(Credit(scene.index, credit.provider, credit.license,
-                           credit.source_url, credit.creator, credit.native))
-        made.append(out.name)
-        if raw and image_library.enabled():
-            entry = image_library.add(raw, out, asdict(credit),
-                                      credit.native)
-            shelf.append(entry)
-            mine.append(entry)
-        drawn = credit.native.split("x")
-        if drawn and drawn[0].isdigit() and int(drawn[0]) < spec.width:
-            # Not an error: it is the free ceiling, and a scaled picture
-            # beats a title card. Said once per scene so a soft frame is
-            # explained rather than puzzling.
-            log.info(f"{scene.slug} <- {credit.provider} at "
-                     f"{credit.native}, scaled up to fill the frame")
-        else:
-            log.info(f"{scene.slug} <- {credit.provider} ({credit.native})")
+        entry, score = match
+        image_library.reuse(entry, out)
+        reused.append(out.name)
+        rows.append(Credit(scene.index, entry.provider or "library",
+                           entry.license or "generated",
+                           entry.source_url, entry.creator, entry.native))
+        log.info(f"{scene.slug} <- library ({score:.0%} match, budget spent)")
 
     if rows:
         save_credits(ep, rows)

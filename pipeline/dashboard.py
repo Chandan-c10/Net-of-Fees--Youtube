@@ -830,7 +830,17 @@ SETTING_GROUPS = (
                  "Creative Commons picture is credited in the description "
                  "automatically. Set IMAGE_FETCH to 0 to place pictures "
                  "in sources/ yourself.",
-     ("IMAGE_PROVIDERS", "IMAGE_FETCH", "IMAGE_STYLE", "IMAGE_LOCAL_URL")),
+     ("IMAGE_PROVIDERS", "IMAGE_FETCH", "IMAGE_STYLE", "IMAGE_LOCAL_URL",
+      "IMAGE_WORKERS")),
+    ("Picture providers", "All free, all optional, tried in the order "
+                          "above. An unconfigured one refuses on a "
+                          "function call rather than a request, so "
+                          "leaving a token blank costs nothing. "
+                          "Cloudflare is the one worth having: ten "
+                          "thousand neurons a day is hundreds of "
+                          "pictures, and it needs no account you do not "
+                          "already have.",
+     ("CLOUDFLARE_AI_TOKEN", "TOGETHER_API_KEY", "HUGGINGFACE_TOKEN")),
     ("Reusing pictures", "A picture drawn once is kept and used again "
                          "when a later scene asks for something close. "
                          "IMAGE_MAX_NEW caps how many an episode draws \u2014 "
