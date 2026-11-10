@@ -19,7 +19,7 @@ from ..manifest import Episode, Manifest
 from ..script_format import parse, render, to_scenes, validate_against_snapshot
 from .export import load_snapshot
 
-ENGINES = ("template", "gemini", "ollama")
+ENGINES = ("file", "template", "gemini", "ollama")
 
 # One deterministic template per recipe. Registered at the bottom of this
 # module, once every builder is defined.
@@ -30,7 +30,9 @@ def run(ep: Episode, m: Manifest, engine: str = "template", profile=None) -> Non
     log = get(m.id, "script")
     data = load_snapshot(ep)
 
-    if engine == "template":
+    if engine == "file":
+        text = _from_file(ep)
+    elif engine == "template":
         builder = TEMPLATES.get(data.get("recipe", ""))
         if builder is None:
             raise ConfigError(
@@ -48,7 +50,7 @@ def run(ep: Episode, m: Manifest, engine: str = "template", profile=None) -> Non
     parsed = parse(text)
     scenes = to_scenes(parsed, default_voice=m.voice)
     validate_against_snapshot(scenes, data, profile)
-    _check_hook(scenes)
+    _check_hook(scenes, profile)
 
     m.scenes = scenes
     ep.script.write_text(render(scenes, m.title), encoding="utf-8")
@@ -57,11 +59,19 @@ def run(ep: Episode, m: Manifest, engine: str = "template", profile=None) -> Non
     log.info(f"{len(scenes)} scenes, {sum(len(s.text.split()) for s in scenes)} words")
 
 
-def _check_hook(scenes) -> None:
+def _check_hook(scenes, profile=None) -> None:
     """Scene 1 must state the finding, not preview it.
 
     Retention across the first 30 seconds is the strongest input to whether
     a long-form video is recommended -- architecture doc, section 26.
+
+    The no-preview rule holds for everything: "in this video we will"
+    loses viewers whatever the subject. The must-carry-a-figure rule does
+    not. It is right for a profile whose whole claim is a number, and
+    wrong for a story, where the hook is an image or a situation -- "On
+    the bank of a great river stood a rose-apple tree" has no figure in
+    it and is a perfectly good opening. Asked of the profile, the same
+    way the tags and the disclaimer now are.
     """
     if not scenes:
         raise StageError("script produced no scenes")
@@ -74,7 +84,10 @@ def _check_hook(scenes) -> None:
                 f"scene 1 opens with {phrase!r}. The hook must state the finding, "
                 f"not preview it -- architecture doc, section 26."
             )
-    if not any(ch.isdigit() for ch in scenes[0].text):
+    binds = True
+    if profile is not None:
+        binds = getattr(profile.visuals, "binds_data_keys", lambda: True)()
+    if binds and not any(ch.isdigit() for ch in scenes[0].text):
         raise StageError(
             "scene 1 contains no number. The opening claim must carry a figure."
         )
@@ -185,6 +198,32 @@ def wants_picture_prompts(profile) -> bool:
     profile cannot be asked for prompts it has no use for.
     """
     return getattr(profile, "MOTION", None) == "kenburns"
+
+
+def _from_file(ep: Episode) -> str:
+    """The script you wrote, taken as it is.
+
+    The other engines make a script out of data. For a story that
+    already exists -- a fable, a piece of history, anything with a text
+    behind it -- there is nothing to generate: the writing is the work,
+    and it is yours. This engine exists so bringing your own script is a
+    first-class way to use the pipeline rather than something you have
+    to fake by editing a manifest by hand.
+
+    Everything after this is unchanged. The script is parsed by the same
+    rules, the same checks run, and Gate 1 still asks a person.
+    """
+    path = ep.script
+    if not path.exists():
+        raise ConfigError(
+            f"no script at {path}. The 'file' engine reads a script you "
+            "wrote; write it there first, with a [SCENE n] header per "
+            "scene and an IMAGE: line saying what each one shows."
+        )
+    text = path.read_text(encoding="utf-8").strip()
+    if not text:
+        raise ConfigError(f"{path} is empty")
+    return text
 
 
 def _prompt(m: Manifest, data: dict, profile) -> str:

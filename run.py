@@ -138,7 +138,8 @@ def _run_stage(name: str, ep: Episode, m: Manifest, settings, args) -> None:
         upload.run(ep, m, dry_run=args.dry_run,
                    assume_not_posted=getattr(args, "assume_not_posted",
                                              False),
-                   profile=profile)
+                   profile=profile,
+                   privacy=getattr(args, "privacy", None))
     elif name == "instagram":
         instagram.run(ep, m, dry_run=args.dry_run, which=args.reel)
     else:
@@ -450,7 +451,7 @@ def build_parser() -> argparse.ArgumentParser:
     ba.add_argument("--profile")
     ba.add_argument("--recipe", default="fee_drag")
     ba.add_argument("--script-engine", default="template",
-                    dest="script_engine")
+                    dest="script_engine", choices=script_gen.ENGINES)
     ba.add_argument("--publish-mode", default="at_slot",
                     choices=("manual", "on_approval", "at_slot"),
                     dest="publish_mode")
@@ -894,6 +895,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="draw every scene picture again")
         # Only a person can answer this, because the narrow upload scope
         # cannot read the channel to find out.
+        rp.add_argument("--privacy",
+                        choices=("private", "unlisted", "public"),
+                        help="how this upload goes out; the default is "
+                             "YOUTUBE_PRIVACY, itself private")
         rp.add_argument("--assume-not-posted", action="store_true",
                         help="you checked the channel and the video is "
                              "not there; skip the reconcile")
@@ -922,7 +927,9 @@ def main(argv: list[str] | None = None) -> int:
         rp.add_argument("--voice-engine", default=config.load().voice_engine,
                         choices=("silent", "kokoro", "cloned"))
         rp.add_argument("--voice", default=None)
-        rp.add_argument("--script-engine", default=config.load().script_engine)
+        rp.add_argument("--script-engine",
+                        default=config.load().script_engine,
+                        choices=script_gen.ENGINES)
         rp.add_argument("--captions", default="derive", choices=("derive", "whisper"))
         rp.add_argument("--params")
         rp.add_argument("-v", "--verbose", action="store_true")

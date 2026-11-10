@@ -53,6 +53,41 @@ SCOPES = wanted_scopes()
 FALLBACK_DISCLAIMER = "Educational content only. Not professional advice."
 
 
+PRIVACY_CHOICES = ("private", "unlisted", "public")
+
+
+def default_privacy() -> str:
+    """How a video goes out, unless a run says otherwise.
+
+    Private by default, and deliberately: while the Google project is
+    awaiting its API audit every upload is forced private anyway, and a
+    default that silently becomes public the day the audit clears is a
+    surprise nobody wants. Change it when you mean to.
+    """
+    import os
+    choice = os.getenv("YOUTUBE_PRIVACY", "private").strip().lower()
+    return choice if choice in PRIVACY_CHOICES else "private"
+
+
+def normalise_privacy(value: str | None) -> str:
+    """The privacy status to upload with, or a refusal.
+
+    A missing value falls back to the configured default, which falls
+    back to private. A value that was given and is wrong raises: an
+    unrecognised setting should be ignored quietly, but a typo someone
+    typed on purpose is a mistake worth stopping for.
+    """
+    if value is None:
+        return default_privacy()
+    choice = value.strip().lower()
+    if choice not in PRIVACY_CHOICES:
+        raise StageError(
+            f"{value!r} is not a privacy status; "
+            f"choose one of {', '.join(PRIVACY_CHOICES)}"
+        )
+    return choice
+
+
 def disclaimer_for(profile=None) -> str:
     """What this profile requires on every video."""
     style = getattr(profile, "style", None)
@@ -390,12 +425,13 @@ def _set_thumbnail(youtube, ep: Episode, m: Manifest, video_id: str, log) -> Non
 
 
 def run(ep: Episode, m: Manifest, dry_run: bool = False,
-        privacy: str = "private", assume_not_posted: bool = False,
+        privacy: str | None = None, assume_not_posted: bool = False,
         profile=None) -> None:
     """Upload the long-form. Shorts publish through the same path, per slot."""
     log = get(m.id, "upload")
     assert_publishable(m)
 
+    privacy = normalise_privacy(privacy)
     if not ep.video.exists():
         raise StageError(f"no video at {ep.video}")
 

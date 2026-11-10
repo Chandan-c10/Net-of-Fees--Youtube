@@ -866,3 +866,67 @@ def test_no_budget_means_every_scene_is_drawn(
     result = images.run_for(episode, story, SHORTS, open_url=open_url)
     assert len(result["made"]) == 3
     assert result["reused"] == []
+
+
+# ---- the provider's own branding --------------------------------------
+
+
+def _marked_png(width=637, height=924):
+    """A picture with a bright strip along the bottom edge, standing in
+    for a provider's watermark."""
+    import numpy as np
+    from PIL import Image
+
+    pixels = np.zeros((height, width, 3), dtype="uint8")
+    ramp = np.linspace(0, 200, width, dtype="uint8")
+    pixels[:, :, :] = np.repeat(np.tile(ramp, (height, 1))[:, :, None], 3, 2)
+    pixels[int(height * 0.95):, int(width * 0.6):] = 255     # the mark
+    buffer = io.BytesIO()
+    Image.fromarray(pixels).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def test_the_generators_watermark_is_cut_off():
+    """`nologo=true` is sent and ignored -- it is paid-tier now -- so the
+    mark arrives on every picture and burns into the render
+    permanently."""
+    from PIL import Image
+
+    body = _marked_png()
+    out = images.strip_watermark(body, "pollinations")
+    before = Image.open(io.BytesIO(body))
+    after = Image.open(io.BytesIO(out))
+    assert after.height < before.height
+    # The marked strip is gone: the brightest pixel left is the gradient.
+    import numpy as np
+    assert np.asarray(after.convert("L")).max() < 255
+
+
+def test_a_provider_that_does_not_brand_is_untouched():
+    from PIL import Image
+
+    body = _marked_png()
+    out = images.strip_watermark(body, "openverse")
+    assert Image.open(io.BytesIO(out)).size == Image.open(io.BytesIO(body)).size
+
+
+def test_a_tiny_picture_is_left_alone_rather_than_destroyed():
+    """A mark half-cropped is worse than one left alone, and a picture
+    cropped to nothing is worse than both."""
+    from PIL import Image
+
+    body = _png(300, 120)
+    out = images.strip_watermark(body, "pollinations")
+    assert Image.open(io.BytesIO(out)).size == (300, 120)
+
+
+def test_a_fetched_picture_is_stripped_before_it_is_stored(local, tmp_path):
+    """Before the library, the episode or the backup holds it."""
+    from PIL import Image
+
+    open_url, routes = local
+    routes.routes["/prompt/a%20village"] = (200, PNG, _marked_png())
+    out = tmp_path / "scene_01.png"
+    images.fetch_one("a village", out, 576, 1024, 1,
+                     chain=("pollinations",), open_url=open_url)
+    assert Image.open(out).height < 924

@@ -57,6 +57,17 @@ MIN_SIDE = 512
 # a solid colour. The same threshold checks.py uses on rendered frames.
 FLAT_STDDEV = 3.0
 
+# Providers that brand what they draw, and how much of the bottom edge
+# the mark occupies.
+#
+# `nologo=true` is sent and ignored -- it is a paid-tier feature now --
+# so the mark arrives on every picture and burns into the render
+# permanently. Measured on real output at 637x924: the mark sits inside
+# the bottom 6%. Seven is taken, because a mark half-cropped is worse
+# than one left alone.
+WATERMARK_STRIP = {"pollinations": 0.07}
+
+
 # Dimensions are asked for in multiples of eight because every diffusion
 # model quietly rounds to that anyway, and capped because a free
 # endpoint will time out long before it refuses.
@@ -526,6 +537,32 @@ def validate(body: bytes) -> tuple[int, int]:
     return width, height
 
 
+def strip_watermark(body: bytes, provider: str) -> bytes:
+    """Cut off the bottom edge where a provider brands its output.
+
+    Done before the picture is saved anywhere, so nothing marked reaches
+    the library, the render, or the backup. A watermark burned into a
+    finished video cannot be removed afterwards without re-rendering,
+    which makes every episode made with one wasted work.
+    """
+    import io
+
+    from PIL import Image
+
+    share = WATERMARK_STRIP.get(provider, 0.0)
+    if share <= 0:
+        return body
+    with Image.open(io.BytesIO(body)) as im:
+        width, height = im.size
+        keep = int(height * (1 - share))
+        if keep < MIN_SIDE // 2:        # nothing worth keeping
+            return body
+        cropped = im.convert("RGB").crop((0, 0, width, keep))
+    buffer = io.BytesIO()
+    cropped.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 def write(body: bytes, out: Path) -> Path:
     """Save as RGB PNG, which is what the visuals stage expects."""
     import io
@@ -555,6 +592,9 @@ def fetch_one(prompt: str, out: Path, width: int, height: int, seed: int,
         try:
             body, credit = provider(prompt, width, height, seed, opener)
             native_w, native_h = validate(body)
+            # Before anything stores it. The library, the episode and the
+            # backup should never hold a marked picture.
+            body = strip_watermark(body, credit.get("provider", name))
         except StageError as exc:
             tried.append(f"{name}: {exc}")
             log.warning(f"{name} could not supply this scene: {exc}")

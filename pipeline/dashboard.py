@@ -839,6 +839,11 @@ SETTING_GROUPS = (
                          "looks better than fourteen near-identical ones. "
                          "0 means no cap.",
      ("IMAGE_MAX_NEW", "IMAGE_REUSE", "IMAGE_REUSE_THRESHOLD")),
+    ("Publishing", "How an upload goes out. Private until you mean "
+                   "otherwise \u2014 and while the Google project awaits "
+                   "its API audit, every upload is forced private "
+                   "whatever this says.",
+     ("YOUTUBE_PRIVACY",)),
     ("Content", "Defaults for new episodes and the trend scan.",
      ("PROFILE", "SCRIPT_ENGINE", "GEMINI_API_KEY", "YOUTUBE_API_KEY",
       "TREND_REGION")),

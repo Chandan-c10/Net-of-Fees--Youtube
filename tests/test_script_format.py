@@ -118,3 +118,69 @@ def test_a_picture_script_survives_a_round_trip():
         script_format.parse(script_format.render(original, "T")))
     assert [(s.text, s.image_prompt) for s in again] == \
            [(s.text, s.image_prompt) for s in original]
+
+
+# ---- bringing your own script -----------------------------------------
+
+
+def test_a_story_opening_needs_no_figure():
+    """"The opening claim must carry a figure" is right for a profile
+    whose whole claim is a number, and wrong for a story: "On the bank of
+    a great river stood a rose-apple tree" is a perfectly good hook."""
+    import profiles
+    from pipeline.stages.script_gen import _check_hook
+
+    scenes = script_format.to_scenes(script_format.parse(
+        "[SCENE 1]\n\nIMAGE: a tree by a river\n\n"
+        "On the bank of a great river stood a rose-apple tree.\n"))
+    _check_hook(scenes, profiles.load("storyboard_shorts"))
+
+
+def test_a_chart_profile_still_needs_its_figure():
+    import pytest as _pytest
+
+    import profiles
+    from pipeline.errors import StageError
+    from pipeline.stages.script_gen import _check_hook
+
+    scenes = script_format.to_scenes(script_format.parse(
+        "[SCENE 1]\n\nCharges took most of a small win.\n"))
+    with _pytest.raises(StageError, match="no number"):
+        _check_hook(scenes, profiles.load("trading"))
+
+
+def test_previewing_is_refused_whatever_the_subject():
+    """"In this video we will" loses viewers on any subject."""
+    import pytest as _pytest
+
+    import profiles
+    from pipeline.errors import StageError
+    from pipeline.stages.script_gen import _check_hook
+
+    scenes = script_format.to_scenes(script_format.parse(
+        "[SCENE 1]\n\nIn this video we will hear about a monkey.\n"))
+    with _pytest.raises(StageError, match="preview"):
+        _check_hook(scenes, profiles.load("storyboard_shorts"))
+
+
+def test_the_file_engine_refuses_clearly_when_there_is_no_script(tmp_path):
+    import pytest as _pytest
+
+    from pipeline.errors import ConfigError
+    from pipeline.manifest import Episode
+    from pipeline.stages.script_gen import _from_file
+
+    ep = Episode("777", tmp_path)
+    ep.ensure_dirs()
+    with _pytest.raises(ConfigError, match="no script at"):
+        _from_file(ep)
+
+
+def test_the_file_engine_reads_the_script_as_written(tmp_path):
+    from pipeline.manifest import Episode
+    from pipeline.stages.script_gen import _from_file
+
+    ep = Episode("778", tmp_path)
+    ep.ensure_dirs()
+    ep.script.write_text("[SCENE 1]\n\nIMAGE: a tree\n\nA line.\n")
+    assert "IMAGE: a tree" in _from_file(ep)

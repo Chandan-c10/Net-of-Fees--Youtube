@@ -409,3 +409,44 @@ def test_a_recipes_tags_do_not_leak_onto_a_story(episode, manifest):
     # And still lead where the profile really is about that subject.
     chart = hashtags(data, profiles.load("engineering"))
     assert chart[0] == "#postmortem"
+
+
+# ---- how a video goes out ---------------------------------------------
+
+
+def test_private_is_the_default(monkeypatch):
+    """A default that silently becomes public the day the audit clears
+    is a surprise nobody wants."""
+    from pipeline.stages import upload
+
+    monkeypatch.delenv("YOUTUBE_PRIVACY", raising=False)
+    assert upload.default_privacy() == "private"
+
+
+def test_the_privacy_can_be_changed_when_meant(monkeypatch):
+    from pipeline.stages import upload
+
+    for choice in ("public", "unlisted", "private"):
+        monkeypatch.setenv("YOUTUBE_PRIVACY", choice.upper())
+        assert upload.default_privacy() == choice
+
+
+def test_an_unrecognised_privacy_falls_back_to_private(monkeypatch):
+    """Never the other way. A typo must not publish something."""
+    from pipeline.stages import upload
+
+    for bad in ("", "pubic", "yes", "1", "   "):
+        monkeypatch.setenv("YOUTUBE_PRIVACY", bad)
+        assert upload.default_privacy() == "private"
+
+
+def test_an_explicit_bad_privacy_is_refused():
+    """An unrecognised setting is ignored quietly; a typo someone typed
+    on purpose is a mistake worth stopping for."""
+    from pipeline.errors import StageError
+    from pipeline.stages import upload
+
+    with pytest.raises(StageError, match="not a privacy status"):
+        upload.normalise_privacy("pubic")
+    assert upload.normalise_privacy("PUBLIC") == "public"
+    assert upload.normalise_privacy(None) in upload.PRIVACY_CHOICES
