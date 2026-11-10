@@ -135,7 +135,9 @@ def _run_stage(name: str, ep: Episode, m: Manifest, settings, args) -> None:
     elif name == "shorts":
         shorts.run(ep, m, profile)
     elif name == "upload":
-        upload.run(ep, m, dry_run=args.dry_run)
+        upload.run(ep, m, dry_run=args.dry_run,
+                   assume_not_posted=getattr(args, "assume_not_posted",
+                                             False))
     elif name == "instagram":
         instagram.run(ep, m, dry_run=args.dry_run, which=args.reel)
     else:
@@ -889,6 +891,11 @@ def main(argv: list[str] | None = None) -> int:
         # generator those are eleven requests you may not get back.
         rp.add_argument("--refetch-images", action="store_true",
                         help="draw every scene picture again")
+        # Only a person can answer this, because the narrow upload scope
+        # cannot read the channel to find out.
+        rp.add_argument("--assume-not-posted", action="store_true",
+                        help="you checked the channel and the video is "
+                             "not there; skip the reconcile")
         rp.add_argument("--approve-script", action="store_true")
         rp.add_argument("--approve", action="store_true")
         rp.add_argument("--publish", action="store_true")

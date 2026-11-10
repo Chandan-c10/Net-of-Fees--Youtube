@@ -177,8 +177,16 @@ def youtube_tags(ep: Episode) -> list[str]:
     return tags
 
 
-def _record_attempt(m: Manifest, platform: str) -> dict:
-    """Write the attempt before calling out, so a crash leaves a trace."""
+def _record_attempt(m: Manifest, platform: str,
+                    counts: bool = True) -> dict:
+    """Write the attempt before calling out, so a crash leaves a trace.
+
+    `counts` is False for a dry run. A dry run contacts YouTube not at
+    all, so recording it as an attempt is a lie with consequences: the
+    next real run sees attempts > 1, believes it is retrying, and tries
+    to reconcile against a channel it cannot read. That is exactly how
+    the first real upload of this pipeline failed.
+    """
     row = {
         "platform": platform,
         "status": "attempting",
@@ -190,10 +198,26 @@ def _record_attempt(m: Manifest, platform: str) -> dict:
     }
     for existing in m.platform_posts:
         if existing["platform"] == platform and existing["status"] != "failed":
-            existing["attempts"] = existing.get("attempts", 1) + 1
+            if counts:
+                existing["attempts"] = existing.get("attempts", 1) + 1
             return existing
+    if not counts:
+        # Nothing recorded at all: a dry run leaves no trace, because
+        # there is nothing to trace.
+        return row
     m.platform_posts.append(row)
     return row
+
+
+def _is_scope_error(exc: Exception) -> bool:
+    """Whether this failure is "you were never allowed to ask that".
+
+    Matched on the reason rather than the status, because 403 also
+    covers quota and suspension, which are not the same thing at all.
+    """
+    text = str(exc)
+    return ("insufficientPermissions" in text
+            or "insufficient authentication scopes" in text.lower())
 
 
 def _reconcile(youtube, row: dict, m: Manifest) -> str | None:
@@ -207,6 +231,21 @@ def _reconcile(youtube, row: dict, m: Manifest) -> str | None:
             part="id,snippet", forMine=True, type="video", maxResults=25
         ).execute()
     except Exception as exc:
+        if _is_scope_error(exc):
+            # Reconciliation needs to read the channel, and the upload
+            # scope deliberately cannot. That is not a misconfiguration
+            # -- it is the narrow scope working as intended, and the
+            # audit was submitted on the basis of it. So say what only a
+            # person can now do, instead of trapping the episode
+            # forever behind a check that can never pass.
+            raise StageError(
+                "a previous attempt was recorded, and this project's "
+                "scope (youtube.upload) cannot read the channel to check "
+                "whether it landed. Look at your channel: if the video "
+                "is NOT there, re-run with --assume-not-posted. If it "
+                "IS there, the episode is already published -- mark it "
+                "so rather than uploading a duplicate."
+            ) from exc
         raise StageError(
             f"cannot reconcile a previous upload attempt: {exc}. "
             f"Check the channel by hand before retrying, or this may double-post."
@@ -336,7 +375,7 @@ def _set_thumbnail(youtube, ep: Episode, m: Manifest, video_id: str, log) -> Non
 
 
 def run(ep: Episode, m: Manifest, dry_run: bool = False,
-        privacy: str = "private") -> None:
+        privacy: str = "private", assume_not_posted: bool = False) -> None:
     """Upload the long-form. Shorts publish through the same path, per slot."""
     log = get(m.id, "upload")
     assert_publishable(m)
@@ -347,7 +386,7 @@ def run(ep: Episode, m: Manifest, dry_run: bool = False,
     data = (json.loads(ep.snapshot.read_text(encoding="utf-8"))
             if ep.snapshot.exists() else None)
     channel = channels.key_for(m)
-    row = _record_attempt(m, "youtube")
+    row = _record_attempt(m, "youtube", counts=not dry_run)
     description = (youtube_description(ep, m, data)
                    + f"\n\nref: {row['idempotency_key']}")
     tags = youtube_tags(ep)
@@ -377,7 +416,8 @@ def run(ep: Episode, m: Manifest, dry_run: bool = False,
 
     youtube = _client(channel)
 
-    if row.get("attempts", 1) > 1 and not row.get("external_id"):
+    if (row.get("attempts", 1) > 1 and not row.get("external_id")
+            and not assume_not_posted):
         found = _reconcile(youtube, row, m)
         if found:
             row.update(status="posted", external_id=found, posted_at=_now())

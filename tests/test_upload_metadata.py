@@ -284,3 +284,45 @@ def test_no_figures_and_no_title_says_so_rather_than_crashing(
     manifest.pass_gate_1()
     with pytest.raises(StageError, match="no title"):
         metadata.run(episode, manifest, profiles.load("trading"))
+
+
+# ---- a dry run is not an attempt --------------------------------------
+
+
+def test_a_dry_run_does_not_record_an_upload_attempt(episode, manifest):
+    """A dry run contacts YouTube not at all. Recording it as an attempt
+    made the next real run believe it was retrying, and try to reconcile
+    against a channel the upload scope cannot read."""
+    from pipeline.stages import upload
+
+    upload._record_attempt(manifest, "youtube", counts=False)
+    assert manifest.platform_posts == []
+
+
+def test_a_real_attempt_is_recorded_before_the_call(manifest):
+    from pipeline.stages import upload
+
+    row = upload._record_attempt(manifest, "youtube")
+    assert row["status"] == "attempting"
+    assert len(manifest.platform_posts) == 1
+
+
+def test_a_dry_run_after_a_real_attempt_does_not_increment_it(manifest):
+    from pipeline.stages import upload
+
+    upload._record_attempt(manifest, "youtube")
+    upload._record_attempt(manifest, "youtube", counts=False)
+    assert manifest.platform_posts[0]["attempts"] == 1
+    upload._record_attempt(manifest, "youtube")
+    assert manifest.platform_posts[0]["attempts"] == 2
+
+
+def test_an_insufficient_scope_is_told_apart_from_other_failures():
+    """403 also covers quota and suspension, which are not the same."""
+    from pipeline.stages import upload
+
+    assert upload._is_scope_error(
+        Exception("Request had insufficient authentication scopes."))
+    assert upload._is_scope_error(Exception("reason: insufficientPermissions"))
+    assert not upload._is_scope_error(Exception("quotaExceeded"))
+    assert not upload._is_scope_error(Exception("403 forbidden"))

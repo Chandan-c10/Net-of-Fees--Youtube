@@ -135,10 +135,35 @@ def _render_clip(ep: Episode, m: Manifest, cand: ShortCandidate,
     return out
 
 
+def already_a_short(profile) -> bool:
+    """Whether the episode itself is the Short.
+
+    A vertical profile renders a Short directly: the whole episode is
+    9:16 and under a minute. There is nothing to extract from it, and
+    trying produced "no scene is between 15s and 60s" -- which is true,
+    and is the wrong question. Because `upload` requires this stage to
+    be done, that error made a vertical episode impossible to publish
+    at all. Found on the first real upload attempt.
+    """
+    try:
+        return not profile.visuals.supports("16:9")
+    except AttributeError:
+        return False
+
+
 def run(ep: Episode, m: Manifest, profile, max_clips: int = DEFAULT_MAX_CLIPS) -> None:
     log = get(m.id, "shorts")
     if not m.gate_2_passed_at:
         raise StageError("gate 2 has not been cleared")
+
+    if already_a_short(profile):
+        # Nothing to cut: the rendered video is the Short. Marked done
+        # rather than skipped silently, because `upload` reads this
+        # stage's state and a vertical episode must be able to reach it.
+        m.mark_done("shorts", count=0, derived=False,
+                    note="the episode is already a vertical Short")
+        log.info("the episode is already a Short; nothing to cut")
+        return
 
     shorts_profile = profile
     if not profile.visuals.supports("9:16"):
