@@ -49,6 +49,11 @@ jobs:
       R2_STORAGE_CAP_GB: ${{ vars.R2_STORAGE_CAP_GB }}
       R2_RETAIN_DAYS: ${{ vars.R2_RETAIN_DAYS }}
       IMAGE_PROVIDERS: ${{ vars.IMAGE_PROVIDERS }}
+      CLOUDFLARE_AI_TOKEN: ${{ secrets.CLOUDFLARE_AI_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+      TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+      IMAGE_WORKERS: ${{ vars.IMAGE_WORKERS }}
       IMAGE_MAX_NEW: ${{ vars.IMAGE_MAX_NEW }}
       IMAGE_PACE_SEC: ${{ vars.IMAGE_PACE_SEC }}
       IMAGE_STYLE: ${{ vars.IMAGE_STYLE }}

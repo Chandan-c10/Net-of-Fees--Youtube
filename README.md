@@ -441,6 +441,8 @@ storage on the free plan is 500 MB.
 | `YOUTUBE_TOKEN_JSON` | the contents of `secrets/youtube_token.json`, pasted. Run `tools/youtube_auth.py` once on any machine to create it. |
 | `IG_USER_ID`, `IG_ACCESS_TOKEN` | the Reel |
 | `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | storing what a run makes, and fetching the pictures it drew last time |
+| `CLOUDFLARE_AI_TOKEN` | drawing the scene pictures. Workers AI gives 10,000 neurons a day free, which is hundreds of pictures; the public endpoint spares a handful |
+| `HUGGINGFACE_TOKEN`, `TOGETHER_API_KEY` | optional second and third sources |
 | `VOICE_REFERENCE_KEY` | the key in that bucket holding your voice recording |
 
 And as repository **variables** (not secrets — none of these are
