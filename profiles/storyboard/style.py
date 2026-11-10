@@ -16,10 +16,12 @@ GRID = "#2A251E"
 DPI = 100
 CHANNEL = "Field Notes"
 
-DISCLAIMER = (
-    "Narration and imagery are generated. Sources are listed in the "
-    "description. Not professional advice."
-)
+# It used to say "Sources are listed in the description", which was
+# false whenever every picture was generated -- and a disclaimer that
+# states something untrue is worse than none. Credits for licensed
+# pictures are added separately by the metadata stage, and only when
+# there are any.
+DISCLAIMER = "Narration and imagery are generated. Not professional advice."
 
 SERIES = "Field Notes"
 

@@ -44,7 +44,14 @@ SHORTS_TYPE = TypeScale(title=46, subtitle=30, label=28, tick=24, annotation=26,
 
 DPI = 100
 CURRENCY = "₹"  # INR
-DISCLAIMER = "Educational only. Not investment advice."
+# The full form, because this profile is the one that needs it: a
+# channel about trading costs is exactly where a viewer might mistake
+# description for advice.
+DISCLAIMER = (
+    "Educational content only. Not investment advice. I am not a "
+    "SEBI-registered investment adviser. Markets carry risk of loss. "
+    "Do your own research."
+)
 CHANNEL = "Net of Fees"
 
 

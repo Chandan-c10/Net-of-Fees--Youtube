@@ -137,7 +137,8 @@ def _run_stage(name: str, ep: Episode, m: Manifest, settings, args) -> None:
     elif name == "upload":
         upload.run(ep, m, dry_run=args.dry_run,
                    assume_not_posted=getattr(args, "assume_not_posted",
-                                             False))
+                                             False),
+                   profile=profile)
     elif name == "instagram":
         instagram.run(ep, m, dry_run=args.dry_run, which=args.reel)
     else:

@@ -44,11 +44,20 @@ def wanted_scopes() -> list[str]:
 
 SCOPES = wanted_scopes()
 
-DISCLAIMER = (
-    "Educational content only. Not investment advice. I am not a "
-    "SEBI-registered investment adviser. Markets carry risk of loss. "
-    "Do your own research."
-)
+# A last resort only. The disclaimer belongs to the profile, because
+# what has to be disclaimed depends entirely on the subject -- this file
+# hardcoded a SEBI investment-adviser notice from when the project was
+# only about trading costs, and stapled it onto a folklore story about
+# a monkey. Deliberately generic: it is what gets used when nothing
+# better is known, not a statement about any particular subject.
+FALLBACK_DISCLAIMER = "Educational content only. Not professional advice."
+
+
+def disclaimer_for(profile=None) -> str:
+    """What this profile requires on every video."""
+    style = getattr(profile, "style", None)
+    text = getattr(style, "DISCLAIMER", "") if style else ""
+    return text.strip() or FALLBACK_DISCLAIMER
 
 
 def _now() -> str:
@@ -85,7 +94,8 @@ TAGS_TOTAL_MAX = 480          # the documented cap is 500; leave headroom
 TAG_MAX = 30
 
 
-def build_description(m: Manifest, data: dict | None = None) -> str:
+def build_description(m: Manifest, data: dict | None = None,
+                      profile=None) -> str:
     """Fallback description, used only when the metadata stage has not run.
 
     Section 14 requires the disclaimer on every video, so it is here as
@@ -95,7 +105,7 @@ def build_description(m: Manifest, data: dict | None = None) -> str:
     if data and data.get("verify_before_publish"):
         parts.append("Rates used are the published schedules at time of recording.")
         parts.append("")
-    parts += [DISCLAIMER, "", f"Episode {m.id}"]
+    parts += [disclaimer_for(profile), "", f"Episode {m.id}"]
     return "\n".join(parts)
 
 
@@ -133,7 +143,7 @@ def load_metadata(ep: Episode) -> dict:
 
 
 def youtube_description(ep: Episode, m: Manifest,
-                        data: dict | None = None) -> str:
+                        data: dict | None = None, profile=None) -> str:
     """The description that actually goes out.
 
     Prefers the metadata stage's text, which carries the hook, the series
@@ -147,9 +157,14 @@ def youtube_description(ep: Episode, m: Manifest,
     meta = load_metadata(ep).get("youtube", {})
     text = (meta.get("description") or "").strip()
     if not text:
-        return build_description(m, data)
-    if "not investment advice" not in text.lower():
-        text += "\n\n" + DISCLAIMER
+        return build_description(m, data, profile)
+    # Matched on this profile's own wording. The old check looked for
+    # "not investment advice" specifically, so a profile that said "not
+    # professional advice" was judged to have no disclaimer and had a
+    # second, contradictory one appended.
+    required = disclaimer_for(profile)
+    if required.lower() not in text.lower():
+        text += "\n\n" + required
     if f"Episode {m.id}" not in text:
         text += f"\n\nEpisode {m.id}"
     return text
@@ -375,7 +390,8 @@ def _set_thumbnail(youtube, ep: Episode, m: Manifest, video_id: str, log) -> Non
 
 
 def run(ep: Episode, m: Manifest, dry_run: bool = False,
-        privacy: str = "private", assume_not_posted: bool = False) -> None:
+        privacy: str = "private", assume_not_posted: bool = False,
+        profile=None) -> None:
     """Upload the long-form. Shorts publish through the same path, per slot."""
     log = get(m.id, "upload")
     assert_publishable(m)
@@ -387,7 +403,7 @@ def run(ep: Episode, m: Manifest, dry_run: bool = False,
             if ep.snapshot.exists() else None)
     channel = channels.key_for(m)
     row = _record_attempt(m, "youtube", counts=not dry_run)
-    description = (youtube_description(ep, m, data)
+    description = (youtube_description(ep, m, data, profile)
                    + f"\n\nref: {row['idempotency_key']}")
     tags = youtube_tags(ep)
 

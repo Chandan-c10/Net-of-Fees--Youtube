@@ -43,10 +43,16 @@ def test_the_crafted_description_is_what_goes_out(with_metadata, manifest):
 
 
 def test_the_disclaimer_is_appended_when_absent(with_metadata, manifest):
-    """Section 14 requires it on every video."""
+    """Section 14 requires one on every video -- the profile's own, not
+    an investment notice on whatever the subject happens to be."""
     ep = with_metadata(FULL)
     out = upload.youtube_description(ep, manifest)
-    assert "not investment advice" in out.lower()
+    assert "not professional advice" in out.lower()
+
+    import profiles
+    trading = upload.youtube_description(ep, manifest, None,
+                                         profiles.load("trading"))
+    assert "not investment advice" in trading.lower()
 
 
 def test_the_disclaimer_is_not_duplicated(with_metadata, manifest):
@@ -66,7 +72,7 @@ def test_a_missing_metadata_file_falls_back(episode, manifest):
     lawful description rather than an empty one."""
     out = upload.youtube_description(episode, manifest)
     assert manifest.title in out
-    assert "not investment advice" in out.lower()
+    assert "not professional advice" in out.lower()
 
 
 def test_an_empty_description_falls_back(with_metadata, manifest):
@@ -326,3 +332,80 @@ def test_an_insufficient_scope_is_told_apart_from_other_failures():
     assert upload._is_scope_error(Exception("reason: insufficientPermissions"))
     assert not upload._is_scope_error(Exception("quotaExceeded"))
     assert not upload._is_scope_error(Exception("403 forbidden"))
+
+
+# ---- the disclaimer belongs to the profile ----------------------------
+
+
+def test_a_story_does_not_carry_an_investment_disclaimer(episode, manifest):
+    """upload.py hardcoded a SEBI investment-adviser notice from when the
+    project was only about trading costs, and stapled it onto a folklore
+    story about a monkey. It went out on a real video."""
+    import profiles
+    from pipeline.stages import upload
+
+    text = upload.disclaimer_for(profiles.load("storyboard_shorts"))
+    assert "SEBI" not in text
+    assert "investment" not in text.lower()
+
+
+def test_the_trading_profile_still_carries_the_full_notice():
+    """Moving it must not lose it where it is actually needed."""
+    import profiles
+    from pipeline.stages import upload
+
+    text = upload.disclaimer_for(profiles.load("trading"))
+    assert "SEBI-registered investment adviser" in text
+
+
+def test_a_profile_with_its_own_wording_gets_no_second_disclaimer(
+        episode, manifest):
+    """The old check looked for "not investment advice" specifically, so a
+    profile saying "not professional advice" was judged to have none and
+    had a contradictory one appended."""
+    import profiles
+    from pipeline.stages import upload
+
+    profile = profiles.load("storyboard_shorts")
+    (episode.dir / "metadata.json").write_text(json.dumps({"youtube": {
+        "description": "A story.\n\n" + profile.style.DISCLAIMER}}))
+    text = upload.youtube_description(episode, manifest, None, profile)
+    assert text.lower().count("not professional advice") == 1
+    assert "SEBI" not in text
+
+
+def test_a_description_with_no_disclaimer_still_gets_one(episode, manifest):
+    import profiles
+    from pipeline.stages import upload
+
+    (episode.dir / "metadata.json").write_text(json.dumps(
+        {"youtube": {"description": "A story with no disclaimer."}}))
+    text = upload.youtube_description(episode, manifest, None,
+                                      profiles.load("storyboard_shorts"))
+    assert "Not professional advice" in text
+
+
+def test_the_storyboard_disclaimer_claims_no_sources_it_lacks():
+    """It said "Sources are listed in the description" when every picture
+    was generated and no sources existed."""
+    import profiles
+
+    assert "Sources are listed" not in \
+        profiles.load("storyboard_shorts").style.DISCLAIMER
+
+
+def test_a_recipes_tags_do_not_leak_onto_a_story(episode, manifest):
+    """A folklore story went out tagged #postmortem and #debugging
+    because its recipe was incident_log. A recipe's tags describe its
+    subject, and a picture profile is not rendering that subject."""
+    import profiles
+    from pipeline.stages.metadata import hashtags
+
+    data = {"recipe": "incident_log"}
+    story = hashtags(data, profiles.load("storyboard_shorts"))
+    assert "#postmortem" not in story
+    assert "#storytime" in story
+
+    # And still lead where the profile really is about that subject.
+    chart = hashtags(data, profiles.load("engineering"))
+    assert chart[0] == "#postmortem"

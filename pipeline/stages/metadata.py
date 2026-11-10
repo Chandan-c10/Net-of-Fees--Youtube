@@ -153,9 +153,18 @@ def _description(data: dict, m: Manifest, profile, hook: str,
 
 
 def hashtags(data: dict, profile, limit: int = 12) -> list[str]:
-    """Profile tags plus any the data earns. Order matters on Instagram."""
+    """Profile tags plus any the data earns. Order matters on Instagram.
+
+    A recipe's tags describe its subject, and only lead when the profile
+    actually renders that subject. A picture profile does not: it tells a
+    story, and the recipe is a source of material rather than the thing
+    on screen. Asking `binds_data_keys` is the existing way to tell those
+    apart -- without it, a folklore story about a monkey went out tagged
+    #postmortem and #debugging because its recipe was incident_log.
+    """
     tags = list(getattr(profile, "HASHTAGS", ()))
-    recipe = data.get("recipe")
+    binds = getattr(profile.visuals, "binds_data_keys", lambda: True)()
+    recipe = data.get("recipe") if binds else None
     if recipe == "incident_log":
         tags = ["#postmortem", "#debugging", *tags]
     elif recipe == "fee_drag" and _has(data, "breakeven_points", "drag_pct"):
