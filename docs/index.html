@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Net of Fees</title>
+<style>
+  :root { color-scheme: light dark; --ink: #1a1a1a; --paper: #fbfbf9; --muted: #555; }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink: #e8e6e1; --paper: #16181c; --muted: #a0a0a0; }
+  }
+  body { background: var(--paper); color: var(--ink); margin: 0;
+         font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 42rem; margin: 0 auto; padding: 3rem 1rem 4rem; }
+  h1 { font-size: 1.9rem; line-height: 1.25; margin: 0 0 .5rem; }
+  h2 { font-size: 1.15rem; margin: 2.25rem 0 .5rem; }
+  p, li { color: var(--ink); }
+  .lede { color: var(--muted); font-size: 1.05rem; }
+  a { color: inherit; }
+  footer { margin-top: 3rem; color: var(--muted); font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Net of Fees</h1>
+  <p class="lede">A personal tool that writes, narrates and renders short
+  videos, then uploads them to its owner&rsquo;s own YouTube channel.</p>
+
+  <h2>What it is</h2>
+  <p>A command-line pipeline run by one person for their own channel. It
+  turns a script into a narrated video with captions, and uploads the
+  result. It is not a service, has no users other than its owner, and
+  nothing can be signed up for.</p>
+
+  <h2>What it does with Google</h2>
+  <p>It uses the YouTube Data API to upload videos to the channel owned by
+  the person running it, after that person has approved each one by hand.
+  It requests the narrowest permission that allows an upload.</p>
+
+  <h2>Two human approvals</h2>
+  <p>Nothing is written or published automatically. A script must be
+  approved by a person before anything is rendered, and a finished video
+  must be approved by a person before anything is posted. A scheduled run
+  can publish what a human already approved; it can never approve.</p>
+
+  <h2>Source</h2>
+  <p><a href="https://github.com/Chandan-c10/Net-of-Fees--Youtube">github.com/Chandan-c10/Net-of-Fees--Youtube</a></p>
+
+  <footer>
+    <p><a href="privacy.html">Privacy policy</a></p>
+  </footer>
+</main>
+</body>
+</html>
