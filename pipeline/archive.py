@@ -29,6 +29,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import hmac
+import json
 import os
 import shutil
 import urllib.error
@@ -285,13 +286,71 @@ def _age_days(last_modified: str) -> float | None:
     return (dt.datetime.now(dt.UTC) - when).total_seconds() / 86400
 
 
+def read_object(key: str, target: Target | None = None) -> bytes:
+    """Read one archived object into memory."""
+    target = target or Target()
+    url, headers = signed_get(target, key)
+    request = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT_SEC) as resp:
+            return resp.read(MAX_RECORD_BYTES)
+    except urllib.error.HTTPError as exc:
+        raise StageError(f"{key} could not be read: {exc.code}") from exc
+    except urllib.error.URLError as exc:
+        raise StageError(f"{key} could not be read: {exc.reason}") from exc
+
+
+def was_posted(record: dict) -> bool:
+    """Whether this episode has actually gone out somewhere.
+
+    Either platform counts. Once it is public anywhere, the archive has
+    done the job it existed for; before that, the archived video may be
+    the only copy of work nobody has judged yet.
+    """
+    if record.get("published_at"):
+        return True
+    for row in record.get("platform_posts") or []:
+        if isinstance(row, dict) and row.get("status") == "posted":
+            return True
+    return False
+
+
+def episode_was_posted(episode_id: str, target: Target,
+                       seen: dict[str, bool] | None = None) -> bool:
+    """Ask the archived record whether this episode was published.
+
+    Unknown means no. A record that is missing, unreadable or not yet
+    uploaded is not evidence that the video is safe to delete, and the
+    whole point of the rule is that an unpublished video is the only
+    copy of something.
+    """
+    if seen is not None and episode_id in seen:
+        return seen[episode_id]
+    answer = False
+    try:
+        raw = read_object(record_key(episode_id, "manifest.json"), target)
+        answer = was_posted(json.loads(raw.decode("utf-8")))
+    except (StageError, ValueError, UnicodeDecodeError):
+        answer = False
+    if seen is not None:
+        seen[episode_id] = answer
+    return answer
+
+
 def expire(target: Target | None = None, dry_run: bool = False,
            days: float | None = None) -> dict:
-    """Delete archived objects past their retention.
+    """Delete archived objects that have gone out and are past their age.
 
-    The cap stops the bucket growing; this stops it filling. Age is the
-    only criterion, which is safe here because the archive is a third
-    copy -- the local file and the published video both predate it.
+    Age alone is not enough. It was, while the archive was a third copy
+    -- the local file and the published video both predated it. It stops
+    being enough the moment this is the backup, because then an
+    unpublished video past its retention is work nobody has judged being
+    deleted on a timer.
+
+    So a video is removed only once the episode has actually been
+    posted. Everything else is held, and said so, because a retention
+    setting that quietly keeps things is one you would rather know
+    about.
     """
     log = get(None, "archive")
     target = target or Target()
@@ -302,6 +361,8 @@ def expire(target: Target | None = None, dry_run: bool = False,
         return {"enabled": False, "note": "R2_RETAIN_DAYS is 0; nothing expires"}
 
     removed, freed, kept = [], 0, 0
+    held: list[dict] = []
+    posted: dict[str, bool] = {}
     for key, size, modified in _list_objects(target):
         if is_permanent(key):
             # The backup does not expire. Everything under these
@@ -312,6 +373,14 @@ def expire(target: Target | None = None, dry_run: bool = False,
         if age is None or age < keep:
             kept += 1
             continue
+        parts = key.split("/", 2)
+        if parts[0] == "episodes" and len(parts) == 3:
+            if not episode_was_posted(parts[1], target, posted):
+                kept += 1
+                held.append({"key": key, "mb": round(size / 1e6, 2),
+                             "age_days": round(age, 1),
+                             "why": "not posted yet"})
+                continue
         if not dry_run:
             url, headers = signed_delete(target, key)
             request = urllib.request.Request(url, headers=headers,
@@ -332,9 +401,11 @@ def expire(target: Target | None = None, dry_run: bool = False,
     if removed and not dry_run:
         log.info(f"expired {len(removed)} objects, freeing "
                  f"{freed / 1e6:.0f} MB")
+    if held:
+        log.info(f"{len(held)} objects held: not posted yet")
     return {
         "enabled": True, "dry_run": dry_run, "retain_days": keep,
-        "removed": removed, "kept": kept,
+        "removed": removed, "kept": kept, "held": held,
         "freed_mb": round(freed / 1e6, 1),
     }
 
@@ -438,6 +509,9 @@ def signed_get(target: Target, key: str,
     suffix = f"?{canonical_query}" if canonical_query else ""
     return f"{target.endpoint}{path}{suffix}", headers
 
+
+# A manifest is a few kilobytes; anything far larger is not one.
+MAX_RECORD_BYTES = 4 * 1024 * 1024
 
 # Prefixes that expiry never touches.
 #

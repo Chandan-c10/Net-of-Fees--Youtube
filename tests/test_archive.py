@@ -418,6 +418,11 @@ def test_expiry_never_touches_the_backup(configured, monkeypatch):
         ("library/abc123.png", 70_000, old),
     ]
     monkeypatch.setattr(archive, "_list_objects", lambda _t: listed)
+    # Posted, so the video itself is eligible; the point of this test is
+    # that the record and the library are not.
+    monkeypatch.setattr(
+        archive, "read_object",
+        lambda _k, _t=None: b'{"published_at": "2026-11-01T00:00:00+00:00"}')
     monkeypatch.setenv("R2_RETAIN_DAYS", "7")
 
     result = archive.expire(configured, dry_run=True)
@@ -518,3 +523,51 @@ def test_listing_without_storage_is_empty_not_an_error(monkeypatch):
     for key in KEYS:
         monkeypatch.delenv(key, raising=False)
     assert archive.archived_episodes() == []
+
+
+def test_an_unposted_video_is_never_expired(configured, monkeypatch):
+    """Age alone was enough while the archive was a third copy. It stops
+    being enough once this is the backup: an unpublished video past its
+    retention is work nobody has judged, deleted on a timer."""
+    old = (dt.datetime.now(dt.UTC) - dt.timedelta(days=400)).strftime(
+        "%Y-%m-%dT%H:%M:%S.000Z")
+    monkeypatch.setattr(archive, "_list_objects", lambda _t: [
+        ("episodes/001/video.mp4", 10_000_000, old)])
+    monkeypatch.setattr(archive, "read_object",
+                        lambda _k, _t=None: b'{"published_at": null}')
+    monkeypatch.setenv("R2_RETAIN_DAYS", "2")
+
+    result = archive.expire(configured, dry_run=True)
+    assert result["removed"] == []
+    assert result["held"][0]["why"] == "not posted yet"
+
+
+def test_a_posted_video_expires_on_schedule(configured, monkeypatch):
+    old = (dt.datetime.now(dt.UTC) - dt.timedelta(days=400)).strftime(
+        "%Y-%m-%dT%H:%M:%S.000Z")
+    monkeypatch.setattr(archive, "_list_objects", lambda _t: [
+        ("episodes/001/video.mp4", 10_000_000, old)])
+    monkeypatch.setattr(
+        archive, "read_object",
+        lambda _k, _t=None: b'{"published_at": "2026-11-01T00:00:00+00:00"}')
+    monkeypatch.setenv("R2_RETAIN_DAYS", "2")
+
+    result = archive.expire(configured, dry_run=True)
+    assert [r["key"] for r in result["removed"]] == ["episodes/001/video.mp4"]
+
+
+def test_a_reel_counts_as_posted(configured):
+    assert archive.was_posted(
+        {"platform_posts": [{"platform": "instagram", "status": "posted"}]})
+    assert not archive.was_posted(
+        {"platform_posts": [{"platform": "instagram", "status": "failed"}]})
+    assert not archive.was_posted({})
+
+
+def test_an_unreadable_record_means_keep(configured, monkeypatch):
+    """Unknown is not evidence that a video is safe to delete."""
+    def explode(_k, _t=None):
+        raise StageError("gone")
+
+    monkeypatch.setattr(archive, "read_object", explode)
+    assert archive.episode_was_posted("001", configured, {}) is False

@@ -15,7 +15,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-ENV_FILE = Path(".env")
+# Absolute, not relative to the working directory: the panel and the
+# loader must agree on one file however the process was started.
+ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
 # Values that are never rendered back, only reported as set or not.
 # KEY_ID is here because R2_ACCESS_KEY_ID ends in _ID and so fell

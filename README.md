@@ -141,10 +141,15 @@ python run.py archive --restore-library  # bring the pictures back
 python run.py archive --prune --dry-run  # what would expire
 ```
 
-Videos expire after `R2_RETAIN_DAYS` (default 7). The episode record and
-the picture library **never** expire: they are small, they are the only
-copy if a machine goes, and a backup that deletes itself on a schedule
-is not a backup.
+Videos expire after `R2_RETAIN_DAYS` (default 7) **and only once the
+episode has actually been posted** — to YouTube or to Instagram, either
+counts. An unposted video is held however old it is, because it is the
+only copy of work nobody has judged yet. `--prune` says what it held and
+why.
+
+The episode record and the picture library **never** expire: they are
+small, they are the only copy if a machine goes, and a backup that
+deletes itself on a schedule is not a backup.
 
 ---
 

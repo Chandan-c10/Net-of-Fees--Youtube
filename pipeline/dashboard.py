@@ -1339,8 +1339,16 @@ class Handler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         if not origin:
             return True
-        return urllib.parse.urlparse(origin).netloc == self.headers.get(
-            "Host", "")
+        host = self.headers.get("Host", "")
+        if urllib.parse.urlparse(origin).netloc == host:
+            return True
+        # Logged because the refusal is indistinguishable from a bug
+        # when it happens to you: the page looks right, the button does
+        # nothing, and the message cannot name the mismatch without
+        # telling an attacker what would have matched.
+        get(None, "panel").warning(
+            f"refused a form post: Origin {origin!r} is not Host {host!r}")
+        return False
 
     def _send(self, body: bytes, code: int = 200,
               ctype: str = "text/html; charset=utf-8") -> None:
@@ -1351,7 +1359,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Referrer-Policy", "no-referrer")
+        # same-origin, not no-referrer. Under no-referrer a browser
+        # strips the origin from form posts as well, sending
+        # `Origin: null` -- which the cross-site check below then
+        # refuses, so the header defeated the check it was next to and
+        # every button returned 403. This still sends no referrer to
+        # any other site, which was the point.
+        self.send_header("Referrer-Policy", "same-origin")
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)

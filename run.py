@@ -663,6 +663,13 @@ def cmd_archive(args) -> int:
         for row in result["removed"][:20]:
             print(f"    {row['key']:48} {row['mb']:7} MB  "
                   f"{row['age_days']:.0f}d")
+        held = result.get("held") or []
+        if held:
+            print(f"\n  {len(held)} kept past their age because the "
+                  "episode has not been posted:")
+            for row in held[:20]:
+                print(f"    {row['key']:48} {row['mb']:7} MB  "
+                      f"{row['age_days']:.0f}d")
         print()
         return 0
     plan = archive.budget(0, target)

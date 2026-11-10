@@ -450,3 +450,21 @@ def test_fetching_a_made_up_id_is_refused(server):
                             {"episode": "../../etc"})
     assert status == 303
     assert "not an episode id" in message_of(location)
+
+
+def test_the_referrer_policy_does_not_break_its_own_forms(server):
+    """`no-referrer` makes a browser send `Origin: null` on a form post,
+    which the cross-site check refuses -- so the security header
+    defeated the security check beside it and every button 403'd."""
+    base, _ep, _m = server
+    with urllib.request.urlopen(base + "/", timeout=10) as r:
+        policy = r.headers.get("Referrer-Policy")
+    assert policy == "same-origin"
+
+
+def test_a_genuinely_cross_site_post_is_still_refused(server):
+    """The check still has to work."""
+    base, _ep, _m = server
+    status, _loc = post(base, "/settings", {"R2_BUCKET": "x"},
+                        headers={"Origin": "http://evil.example"})
+    assert status == 403
