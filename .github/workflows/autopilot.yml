@@ -29,7 +29,7 @@ on:
     # unattended. A manual run proves less, because pressing the button
     # is itself the human decision a gate asks for. Remove once a
     # scheduled run has published.
-    - cron: "50 11 * * *"  # 17:20 IST
+    - cron: "35 12 * * *"  # 18:05 IST
   workflow_dispatch:
     inputs:
       title:
