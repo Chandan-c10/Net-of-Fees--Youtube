@@ -38,6 +38,7 @@ jobs:
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       R2_STORAGE_CAP_GB: ${{ vars.R2_STORAGE_CAP_GB || secrets.R2_STORAGE_CAP_GB }}
       R2_RETAIN_DAYS: ${{ vars.R2_RETAIN_DAYS || secrets.R2_RETAIN_DAYS }}
+      R2_IMAGE_RETAIN_DAYS: ${{ vars.R2_IMAGE_RETAIN_DAYS || secrets.R2_IMAGE_RETAIN_DAYS }}
       SMTP_HOST: ${{ secrets.SMTP_HOST }}
       SMTP_PORT: ${{ secrets.SMTP_PORT }}
       SMTP_USER: ${{ secrets.SMTP_USER }}

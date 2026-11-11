@@ -707,7 +707,8 @@ def cmd_archive(args) -> int:
     print(f"\n  {plan['used'] / 1e9:.2f} GB of "
           f"{plan['limit'] / 1e9:.2f} GB ({plan['percent']:.0f}%), "
           f"{plan['free'] / 1e9:.2f} GB free")
-    print(f"  objects expire after {archive.retain_days():g} days\n")
+    print(f"  videos expire after {archive.retain_days():g} days, "
+          f"pictures after {archive.image_retain_days():g}\n")
     return 0
 
 

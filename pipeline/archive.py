@@ -62,6 +62,10 @@ DEFAULT_CAP_GB = 9.5
 # render's artifact expiring after seven days -- is over by then, and
 # by that point the episode is either published or abandoned.
 DEFAULT_RETAIN_DAYS = 7
+# Pictures go sooner than videos. A picture has done its job once
+# the video is rendered; the video has to survive until it is
+# posted and seen.
+DEFAULT_IMAGE_RETAIN_DAYS = 1
 
 # Listing costs a Class B operation, of which there are 10 million free
 # a month. Cached for a run so a batch does not list once per episode.
@@ -207,6 +211,23 @@ def retain_days() -> float:
         return max(0.0, float(raw))
     except ValueError:
         return DEFAULT_RETAIN_DAYS
+
+
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
+
+
+def image_retain_days() -> float:
+    """How long to keep an archived picture. 0 keeps them for good."""
+    raw = os.getenv("R2_IMAGE_RETAIN_DAYS",
+                    str(DEFAULT_IMAGE_RETAIN_DAYS)).strip()
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return DEFAULT_IMAGE_RETAIN_DAYS
+
+
+def is_image(key: str) -> bool:
+    return key.lower().endswith(IMAGE_SUFFIXES)
 
 
 def _list_objects(target: Target) -> list[tuple[str, int, str]]:
@@ -357,8 +378,13 @@ def expire(target: Target | None = None, dry_run: bool = False,
     if not target.configured:
         return {"enabled": False, "note": "archive storage is not configured"}
     keep = retain_days() if days is None else days
-    if not keep:
-        return {"enabled": False, "note": "R2_RETAIN_DAYS is 0; nothing expires"}
+    # Pictures keep their own, shorter clock, unless `days` was given --
+    # an explicit age on the command line means that age for everything.
+    keep_images = image_retain_days() if days is None else days
+    if not keep and not keep_images:
+        return {"enabled": False,
+                "note": "R2_RETAIN_DAYS and R2_IMAGE_RETAIN_DAYS are both 0; "
+                        "nothing expires"}
 
     removed, freed, kept = [], 0, 0
     held: list[dict] = []
@@ -369,8 +395,9 @@ def expire(target: Target | None = None, dry_run: bool = False,
             # prefixes is the only copy of something.
             kept += 1
             continue
+        limit = keep_images if is_image(key) else keep
         age = _age_days(modified)
-        if age is None or age < keep:
+        if not limit or age is None or age < limit:
             kept += 1
             continue
         parts = key.split("/", 2)
@@ -405,6 +432,7 @@ def expire(target: Target | None = None, dry_run: bool = False,
         log.info(f"{len(held)} objects held: not posted yet")
     return {
         "enabled": True, "dry_run": dry_run, "retain_days": keep,
+        "image_retain_days": keep_images,
         "removed": removed, "kept": kept, "held": held,
         "freed_mb": round(freed / 1e6, 1),
     }
@@ -520,7 +548,11 @@ MAX_RECORD_BYTES = 4 * 1024 * 1024
 # These are not. They are the backup -- the only copy if the laptop
 # goes -- and expiring them would mean the safety net deleting itself
 # on a schedule.
-PERMANENT = ("record/", "library/")
+# `library/` was here too, until the owner set a one-day clock on
+# pictures. The record stays: it is a few kilobytes, it is the only
+# account of what an episode was, and a video can be re-rendered from
+# it while it cannot be recovered from a video.
+PERMANENT = ("record/",)
 
 # Small, and the whole account of what an episode is. A video can be
 # re-rendered from these; they cannot be recovered from a video.

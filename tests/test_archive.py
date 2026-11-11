@@ -370,9 +370,28 @@ def test_retention_can_be_changed_or_turned_off(monkeypatch):
     assert archive.retain_days() == 0
 
 
-def test_nothing_expires_when_retention_is_off(monkeypatch, configured):
+def test_nothing_expires_when_both_clocks_are_off(monkeypatch, configured):
+    """Both, now that there are two. Turning the video clock off while
+    the picture clock runs is a setting, not a way to stop expiry."""
     monkeypatch.setenv("R2_RETAIN_DAYS", "0")
+    monkeypatch.setenv("R2_IMAGE_RETAIN_DAYS", "0")
     assert archive.expire(configured)["enabled"] is False
+
+
+def test_turning_the_video_clock_off_leaves_the_picture_clock_running(
+        monkeypatch, configured):
+    monkeypatch.setenv("R2_RETAIN_DAYS", "0")
+    monkeypatch.setenv("R2_IMAGE_RETAIN_DAYS", "1")
+    monkeypatch.setattr(archive, "_list_objects", lambda _t: [
+        ("library/old.png", 70_000,
+         (dt.datetime.now(dt.UTC) - dt.timedelta(days=3)).strftime(
+             "%Y-%m-%dT%H:%M:%S.000Z")),
+        ("episodes/001/video.mp4", 10_000_000,
+         (dt.datetime.now(dt.UTC) - dt.timedelta(days=300)).strftime(
+             "%Y-%m-%dT%H:%M:%S.000Z")),
+    ])
+    result = archive.expire(configured, dry_run=True)
+    assert [r["key"] for r in result["removed"]] == ["library/old.png"]
 
 
 def test_expiry_needs_configuration(monkeypatch):
@@ -404,11 +423,13 @@ def test_object_age_is_read_from_the_listing(modified, older):
 # ---- the backup must not expire itself --------------------------------
 
 
-def test_expiry_never_touches_the_backup(configured, monkeypatch):
-    """The rest of the bucket is a third copy, so deleting by age loses
-    nothing. These prefixes are the only copy if the laptop goes, and
-    expiring them would be the safety net deleting itself on a
-    schedule."""
+def test_expiry_never_touches_the_record(configured, monkeypatch):
+    """The record is the only account of what an episode was.
+
+    A video can be re-rendered from a script; a script cannot be
+    recovered from a video. `library/` used to be held the same way and
+    is not any more: the owner set a one-day clock on pictures.
+    """
     old = (dt.datetime.now(dt.UTC) - dt.timedelta(days=400)).strftime(
         "%Y-%m-%dT%H:%M:%S.000Z")
     listed = [
@@ -427,15 +448,81 @@ def test_expiry_never_touches_the_backup(configured, monkeypatch):
 
     result = archive.expire(configured, dry_run=True)
     gone = {row["key"] for row in result["removed"]}
-    assert gone == {"episodes/001/video.mp4"}
-    assert result["kept"] == 3
+    assert gone == {"episodes/001/video.mp4", "library/abc123.png"}
+    assert result["kept"] == 2          # the two record files
 
 
 def test_every_permanent_prefix_is_recognised():
-    for key in ("record/001/manifest.json", "library/abc.png"):
-        assert archive.is_permanent(key)
-    for key in ("episodes/001/video.mp4", "recordings/x", "lib/x"):
+    assert archive.is_permanent("record/001/manifest.json")
+    for key in ("episodes/001/video.mp4", "library/abc.png",
+                "recordings/x", "lib/x"):
         assert not archive.is_permanent(key)
+
+
+# ---- two clocks: pictures go sooner than videos -----------------------
+
+
+def _aged(days: float) -> str:
+    return (dt.datetime.now(dt.UTC) - dt.timedelta(days=days)).strftime(
+        "%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def _expire_with(monkeypatch, configured, listed, **env):
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(archive, "_list_objects", lambda _t: listed)
+    monkeypatch.setattr(
+        archive, "read_object",
+        lambda _k, _t=None: b'{"published_at": "2020-01-01T00:00:00+00:00"}')
+    return archive.expire(configured, dry_run=True)
+
+
+def test_a_picture_goes_a_day_before_a_video_does(configured, monkeypatch):
+    """Images 1 day, videos 2. A picture has done its job once the video
+    is rendered; the video has to survive until it is posted and seen."""
+    listed = [
+        ("library/old.png", 70_000, _aged(1.5)),
+        ("library/fresh.png", 70_000, _aged(0.5)),
+        ("episodes/001/video.mp4", 10_000_000, _aged(1.5)),
+    ]
+    result = _expire_with(monkeypatch, configured, listed,
+                          R2_RETAIN_DAYS="2", R2_IMAGE_RETAIN_DAYS="1")
+    gone = {row["key"] for row in result["removed"]}
+    assert gone == {"library/old.png"}, (
+        "the day-and-a-half picture should go and the video should not"
+    )
+    assert result["retain_days"] == 2
+    assert result["image_retain_days"] == 1
+
+
+def test_a_video_still_goes_at_two_days(configured, monkeypatch):
+    listed = [("episodes/001/video.mp4", 10_000_000, _aged(2.5))]
+    result = _expire_with(monkeypatch, configured, listed,
+                          R2_RETAIN_DAYS="2", R2_IMAGE_RETAIN_DAYS="1")
+    assert [r["key"] for r in result["removed"]] == ["episodes/001/video.mp4"]
+
+
+def test_a_zero_picture_clock_keeps_pictures_for_good(configured, monkeypatch):
+    """Turning one clock off must not turn the other off with it."""
+    listed = [
+        ("library/ancient.png", 70_000, _aged(400)),
+        ("episodes/001/video.mp4", 10_000_000, _aged(400)),
+    ]
+    result = _expire_with(monkeypatch, configured, listed,
+                          R2_RETAIN_DAYS="2", R2_IMAGE_RETAIN_DAYS="0")
+    assert [r["key"] for r in result["removed"]] == ["episodes/001/video.mp4"]
+
+
+def test_an_unposted_episodes_files_are_still_held(configured, monkeypatch):
+    """The clock never deletes work nobody has judged."""
+    listed = [("episodes/001/video.mp4", 10_000_000, _aged(9))]
+    monkeypatch.setenv("R2_RETAIN_DAYS", "2")
+    monkeypatch.setattr(archive, "_list_objects", lambda _t: listed)
+    monkeypatch.setattr(archive, "read_object",
+                        lambda _k, _t=None: b'{"platform_posts": []}')
+    result = archive.expire(configured, dry_run=True)
+    assert not result["removed"]
+    assert result["held"][0]["why"] == "not posted yet"
 
 
 def test_a_record_file_is_sent_with_its_own_content_type():
