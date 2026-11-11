@@ -79,5 +79,12 @@ jobs:
             tail -n 60 /tmp/pytest.out
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          # Also as annotations, which are readable through the public
+          # API. The job summary is not, and the log needs admin -- so
+          # without this the reason a run failed is visible only to the
+          # repository owner, which is how fifty red runs went unread.
+          grep -E "^(FAILED|ERROR) " /tmp/pytest.out | head -20 | while read -r line; do
+            echo "::error title=${{ matrix.os }} py${{ matrix.python }}::$line"
+          done
           # The real verdict, after the summary has been written.
           grep -qE "^[0-9]+ passed" /tmp/pytest.out &&             ! grep -qE "failed|error" /tmp/pytest.out
