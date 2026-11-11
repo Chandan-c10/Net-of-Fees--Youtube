@@ -16,7 +16,7 @@ name: autopilot
 
 on:
   schedule:
-    - cron: "30 8 * * *"   # 14:00 IST
+    - cron: "40 9 * * *"   # 15:10 IST
   workflow_dispatch:
     inputs:
       title:
