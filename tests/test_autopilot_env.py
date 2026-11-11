@@ -132,6 +132,23 @@ def test_every_variable_falls_back_to_a_secret():
             )
 
 
+def test_every_secret_falls_back_to_a_variable():
+    """The converse, for the same reason.
+
+    SMTP_HOST is not a credential and belongs in the variables list,
+    where a workflow reading only `secrets.SMTP_HOST` would never see
+    it -- and the symptom is an unattended channel that cannot tell
+    anybody anything.
+    """
+    bare = re.compile(r"\$\{\{\s*secrets\.([A-Z0-9_]+)\s*\}\}")
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        for match in bare.finditer(path.read_text(encoding="utf-8")):
+            raise AssertionError(
+                f"{path.name} reads secrets.{match.group(1)} with no "
+                f"fallback. Write `${{{{ secrets.X || vars.X }}}}`."
+            )
+
+
 def test_no_step_condition_reads_secrets():
     """GitHub does not give a step `if` the `secrets` context.
 

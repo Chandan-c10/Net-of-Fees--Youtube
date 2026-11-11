@@ -41,27 +41,27 @@ jobs:
     env:
       ID: ${{ inputs.story }}
       VOICE_ENGINE: ${{ inputs.voice_engine }}
-      SMTP_HOST: ${{ secrets.SMTP_HOST }}
-      SMTP_PORT: ${{ secrets.SMTP_PORT }}
-      SMTP_USER: ${{ secrets.SMTP_USER }}
-      SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
-      ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
-      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-      R2_BUCKET: ${{ secrets.R2_BUCKET }}
-      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST || vars.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT || vars.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER || vars.SMTP_USER }}
+      SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD || vars.SMTP_APP_PASSWORD }}
+      ALERT_EMAIL: ${{ secrets.ALERT_EMAIL || vars.ALERT_EMAIL }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID || vars.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET || vars.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || vars.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || vars.R2_SECRET_ACCESS_KEY }}
       R2_STORAGE_CAP_GB: ${{ vars.R2_STORAGE_CAP_GB || secrets.R2_STORAGE_CAP_GB }}
       R2_RETAIN_DAYS: ${{ vars.R2_RETAIN_DAYS || secrets.R2_RETAIN_DAYS }}
       R2_IMAGE_RETAIN_DAYS: ${{ vars.R2_IMAGE_RETAIN_DAYS || secrets.R2_IMAGE_RETAIN_DAYS }}
-      CLOUDFLARE_AI_TOKEN: ${{ secrets.CLOUDFLARE_AI_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+      CLOUDFLARE_AI_TOKEN: ${{ secrets.CLOUDFLARE_AI_TOKEN || vars.CLOUDFLARE_AI_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN || vars.HUGGINGFACE_TOKEN }}
       IMAGE_PROVIDERS: ${{ vars.IMAGE_PROVIDERS || secrets.IMAGE_PROVIDERS }}
       IMAGE_MAX_NEW: ${{ vars.IMAGE_MAX_NEW || secrets.IMAGE_MAX_NEW }}
       IMAGE_PACE_SEC: ${{ vars.IMAGE_PACE_SEC || secrets.IMAGE_PACE_SEC }}
       IMAGE_WORKERS: ${{ vars.IMAGE_WORKERS || secrets.IMAGE_WORKERS }}
       IMAGE_STYLE: ${{ vars.IMAGE_STYLE || secrets.IMAGE_STYLE }}
-      VOICE_REFERENCE_KEY: ${{ secrets.VOICE_REFERENCE_KEY }}
+      VOICE_REFERENCE_KEY: ${{ secrets.VOICE_REFERENCE_KEY || vars.VOICE_REFERENCE_KEY }}
 
     steps:
       - uses: actions/checkout@v4

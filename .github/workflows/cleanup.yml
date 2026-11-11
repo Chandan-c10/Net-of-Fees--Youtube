@@ -32,18 +32,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-      R2_BUCKET: ${{ secrets.R2_BUCKET }}
-      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID || vars.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET || vars.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || vars.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || vars.R2_SECRET_ACCESS_KEY }}
       R2_STORAGE_CAP_GB: ${{ vars.R2_STORAGE_CAP_GB || secrets.R2_STORAGE_CAP_GB }}
       R2_RETAIN_DAYS: ${{ vars.R2_RETAIN_DAYS || secrets.R2_RETAIN_DAYS }}
       R2_IMAGE_RETAIN_DAYS: ${{ vars.R2_IMAGE_RETAIN_DAYS || secrets.R2_IMAGE_RETAIN_DAYS }}
-      SMTP_HOST: ${{ secrets.SMTP_HOST }}
-      SMTP_PORT: ${{ secrets.SMTP_PORT }}
-      SMTP_USER: ${{ secrets.SMTP_USER }}
-      SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
-      ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST || vars.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT || vars.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER || vars.SMTP_USER }}
+      SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD || vars.SMTP_APP_PASSWORD }}
+      ALERT_EMAIL: ${{ secrets.ALERT_EMAIL || vars.ALERT_EMAIL }}
 
     steps:
       - uses: actions/checkout@v4

@@ -15,13 +15,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      SMTP_HOST: ${{ secrets.SMTP_HOST }}
-      SMTP_PORT: ${{ secrets.SMTP_PORT }}
-      SMTP_USER: ${{ secrets.SMTP_USER }}
-      SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
-      ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
-      IG_USER_ID: ${{ secrets.IG_USER_ID }}
-      IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST || vars.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT || vars.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER || vars.SMTP_USER }}
+      SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD || vars.SMTP_APP_PASSWORD }}
+      ALERT_EMAIL: ${{ secrets.ALERT_EMAIL || vars.ALERT_EMAIL }}
+      IG_USER_ID: ${{ secrets.IG_USER_ID || vars.IG_USER_ID }}
+      IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN || vars.IG_ACCESS_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,7 +32,7 @@ jobs:
       - run: pip install -r requirements.txt -r requirements-publish.txt
       - name: Restore the YouTube credentials
         env:
-          TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
+          TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON || vars.YOUTUBE_TOKEN_JSON }}
         run: |
           if [ -z "$TOKEN_JSON" ]; then
             echo "::error::YOUTUBE_TOKEN_JSON is not set"; exit 1

@@ -36,13 +36,13 @@ jobs:
     timeout-minutes: 30
     env:
       ID: ${{ inputs.episode }}
-      SMTP_HOST: ${{ secrets.SMTP_HOST }}
-      SMTP_PORT: ${{ secrets.SMTP_PORT }}
-      SMTP_USER: ${{ secrets.SMTP_USER }}
-      SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
-      ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
-      IG_USER_ID: ${{ secrets.IG_USER_ID }}
-      IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST || vars.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT || vars.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER || vars.SMTP_USER }}
+      SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD || vars.SMTP_APP_PASSWORD }}
+      ALERT_EMAIL: ${{ secrets.ALERT_EMAIL || vars.ALERT_EMAIL }}
+      IG_USER_ID: ${{ secrets.IG_USER_ID || vars.IG_USER_ID }}
+      IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN || vars.IG_ACCESS_TOKEN }}
 
     steps:
       - name: Check the confirmation
@@ -90,7 +90,7 @@ jobs:
       - name: Restore the YouTube credentials
         if: inputs.where != 'instagram'
         env:
-          TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
+          TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON || vars.YOUTUBE_TOKEN_JSON }}
         run: |
           if [ -z "$TOKEN_JSON" ]; then
             echo "::error::YOUTUBE_TOKEN_JSON is not set. Run tools/youtube_auth.py once locally and paste secrets/youtube_token.json into that repository secret."
