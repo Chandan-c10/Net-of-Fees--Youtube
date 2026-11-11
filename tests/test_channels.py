@@ -7,6 +7,8 @@ the fallback that keeps a single-channel setup working untouched.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from pipeline import channels
@@ -94,14 +96,17 @@ def test_it_falls_back_to_the_single_channel_file(tmp_path, monkeypatch):
 def test_an_explicit_per_channel_override_wins(tmp_path, monkeypatch):
     monkeypatch.setattr(channels, "SECRETS_DIR", tmp_path)
     monkeypatch.setenv("YOUTUBE_TOKEN_FILE_TRADING", "/tmp/t.json")
-    assert str(channels.youtube_token_path("trading")) == "/tmp/t.json"
+    # Compared as a path, not as a string: Windows spells the same path
+    # "\\tmp\\t.json", and the resolver is right either way. The test
+    # was the thing that only worked on one operating system.
+    assert channels.youtube_token_path("trading") == Path("/tmp/t.json")
 
 
 def test_the_global_override_still_applies(tmp_path, monkeypatch):
     monkeypatch.setattr(channels, "SECRETS_DIR", tmp_path)
     monkeypatch.delenv("YOUTUBE_TOKEN_FILE_TRADING", raising=False)
     monkeypatch.setenv("YOUTUBE_TOKEN_FILE", "/tmp/global.json")
-    assert str(channels.youtube_token_path("trading")) == "/tmp/global.json"
+    assert channels.youtube_token_path("trading") == Path("/tmp/global.json")
 
 
 # ---- instagram credentials --------------------------------------------
