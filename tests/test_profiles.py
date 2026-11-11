@@ -83,7 +83,16 @@ def test_every_declared_chart_actually_renders(tmp_path, name):
     p = profiles.load(name)
     spec = SHORTS if p.visuals.supports("9:16") else LONGFORM
     recipe = "incident_log" if "engineering" in name else "fee_drag"
-    data = get(recipe).export()
+    # data/incidents.json is gitignored -- it holds a real incident log
+    # -- so on a fresh checkout it does not exist and this test failed
+    # on every CI run the project has ever had. The committed example
+    # is what the test actually needs: something to draw.
+    params = {}
+    if recipe == "incident_log":
+        from pipeline.recipes.incident_log import LOG_PATH
+        if not LOG_PATH.exists():
+            params["log"] = str(LOG_PATH.with_name("incidents.example.json"))
+    data = get(recipe).export(**params)
     data["title"] = "Fixture"
 
     for key in p.visuals.available_keys():
