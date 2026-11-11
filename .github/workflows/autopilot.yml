@@ -16,7 +16,7 @@ name: autopilot
 
 on:
   schedule:
-    - cron: "0 1 * * *"    # 06:30 IST, ahead of the morning slot
+    - cron: "30 8 * * *"   # 14:00 IST
   workflow_dispatch:
     inputs:
       title:

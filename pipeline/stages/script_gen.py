@@ -386,7 +386,7 @@ def _ask_gemini(prompt: str) -> str:
         ) from exc
     genai.configure(api_key=key)
     model = genai.GenerativeModel(os.getenv("GEMINI_MODEL",
-                                            "gemini-2.0-flash"))
+                                            "gemini-3.8-flash"))
     resp = model.generate_content(prompt)
     text = getattr(resp, "text", None)
     if not text:
@@ -436,7 +436,7 @@ def _from_gemini(m: Manifest, data: dict, profile) -> str:
             "pip install google-generativeai, or use --script-engine template"
         ) from exc
     genai.configure(api_key=key)
-    model = genai.GenerativeModel(os.getenv("GEMINI_MODEL", "gemini-2.0-flash"))
+    model = genai.GenerativeModel(os.getenv("GEMINI_MODEL", "gemini-3.8-flash"))
     resp = model.generate_content(_prompt(m, data, profile))
     if not getattr(resp, "text", None):
         raise StageError("Gemini returned an empty response")
