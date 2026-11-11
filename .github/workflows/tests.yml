@@ -63,4 +63,21 @@ jobs:
 
       - name: Test
         continue-on-error: ${{ matrix.experimental || false }}
-        run: python -m pytest -q -ra
+        shell: bash
+        run: |
+          # Written to the job summary as well as the log, because the
+          # log needs admin rights on the repository to read and the
+          # summary does not. A CI failure nobody can see the reason
+          # for is a CI failure nobody fixes -- this one went unread
+          # for two weeks.
+          set -o pipefail
+          python -m pytest -q -ra --tb=short 2>&1 | tee /tmp/pytest.out || true
+          {
+            echo "### ${{ matrix.os }} / Python ${{ matrix.python }}"
+            echo
+            echo '```'
+            tail -n 60 /tmp/pytest.out
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # The real verdict, after the summary has been written.
+          grep -qE "^[0-9]+ passed" /tmp/pytest.out &&             ! grep -qE "failed|error" /tmp/pytest.out
