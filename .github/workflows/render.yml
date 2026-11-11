@@ -182,7 +182,7 @@ jobs:
           run = ("https://github.com/${{ github.repository }}/actions/runs/"
                  "${{ github.run_id }}")
           ch.send(
-              f"[net-of-fees] {ep} is rendered and waiting at Gate 2",
+              f"{ep} is rendered and waiting at Gate 2",
               f"Episode {ep} rendered with the "
               f"{os.environ['VOICE_ENGINE']} voice.\n\n"
               f"Download the video from the run artifacts and watch it:\n"

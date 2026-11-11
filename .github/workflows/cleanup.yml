@@ -94,7 +94,7 @@ jobs:
           # Warned while there is still room to act, rather than when
           # the next upload is refused.
           ch.send(
-              "[net-of-fees] the archive bucket is filling up",
+              "the archive bucket is filling up",
               f"{plan['used'] / 1e9:.2f} GB of {plan['limit'] / 1e9:.2f} GB "
               f"({plan['percent']:.0f}%).\n\n"
               "Uploads stop at the cap rather than start charging, so "

@@ -217,7 +217,7 @@ jobs:
           run = ("https://github.com/${{ github.repository }}/actions/runs/"
                  "${{ github.run_id }}")
           ch.send(
-              f"[net-of-fees] {title}",
+              f"{title}",
               (f"{title}\n\n"
                + (f"Published: {video}\n\n" if video else
                   f"Rendered and waiting. {run}\n\n")

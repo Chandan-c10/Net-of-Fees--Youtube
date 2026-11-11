@@ -124,3 +124,64 @@ def test_test_channel_reports_a_refused_connection(configured, monkeypatch):
     monkeypatch.setattr(notify.Channel, "send", explode)
     ok, detail = notify.test_channel()
     assert not ok and "SMTPAuthenticationError" in detail
+
+
+# ---- one shape for every subject --------------------------------------
+
+
+def test_a_subject_wears_the_project_name():
+    from pipeline.notify import subject_line
+
+    assert subject_line("the story queue is empty") == \
+        'Net-of-Fees "the story queue is empty"'
+
+
+def test_an_old_style_subject_is_not_wrapped_twice():
+    from pipeline.notify import subject_line
+
+    assert subject_line("[net-of-fees] broken: KeyError in voice") == \
+        'Net-of-Fees "broken: KeyError in voice"'
+    assert subject_line('Net-of-Fees "already named"') == \
+        'Net-of-Fees "already named"'
+
+
+def test_an_empty_subject_still_says_who_sent_it():
+    from pipeline.notify import subject_line
+
+    assert subject_line("") == "Net-of-Fees"
+
+
+def test_the_sent_message_carries_the_shaped_subject(monkeypatch):
+    """Shaped in send(), so five workflow files cannot each differ."""
+    import smtplib
+
+    from pipeline import notify
+
+    sent = {}
+
+    class Recorder:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def starttls(self, *a, **k):
+            pass
+
+        def login(self, *a, **k):
+            pass
+
+        def send_message(self, msg):
+            sent["subject"] = msg["Subject"]
+
+    monkeypatch.setattr(smtplib, "SMTP", Recorder)
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("SMTP_USER", "a@example.com")
+    monkeypatch.setenv("SMTP_APP_PASSWORD", "x")
+    monkeypatch.setenv("ALERT_EMAIL", "b@example.com")
+    notify.Channel().send("the render failed", "body")
+    assert sent["subject"] == 'Net-of-Fees "the render failed"'

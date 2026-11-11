@@ -26,6 +26,29 @@ from .logging_setup import get
 
 TIMEOUT_SEC = 20
 
+# Every message from this channel wears the same name, so a mailbox can
+# file them on sight: Net-of-Fees "the story queue is empty".
+SUBJECT_NAME = "Net-of-Fees"
+
+
+def subject_line(text: str) -> str:
+    """One shape for every subject this project sends.
+
+    Applied in `send` rather than asked of each caller, because the
+    callers include inline scripts in five workflow files and a rule
+    that lives in six places is a rule that will differ in one of them.
+    """
+    text = (text or "").strip()
+    for old in ("[net-of-fees]", "[Net-of-Fees]", "[NET-OF-FEES]"):
+        if text.lower().startswith(old.lower()):
+            text = text[len(old):].strip()
+            break
+    if not text:
+        return SUBJECT_NAME
+    if text.startswith(SUBJECT_NAME):
+        return text
+    return f'{SUBJECT_NAME} "{text}"'
+
 # Gmail and most providers: 587 STARTTLS, or 465 implicit TLS.
 IMPLICIT_TLS_PORT = 465
 
@@ -69,7 +92,7 @@ class Channel:
     def send(self, subject: str, body: str) -> None:
         """Deliver one message. Raises on failure; callers decide what that means."""
         msg = EmailMessage()
-        msg["Subject"] = scrub.censor(subject)
+        msg["Subject"] = scrub.censor(subject_line(subject))
         msg["From"] = self.user or f"net-of-fees@{self.host}"
         msg["To"] = self.to
         msg.set_content(scrub.censor(body))
@@ -97,7 +120,7 @@ def test_channel() -> tuple[bool, str]:
         return False, "not configured: missing " + ", ".join(ch.missing())
     try:
         ch.send(
-            "[net-of-fees] alert channel test",
+            "alert channel test",
             "This is a test of the failure-alert channel.\n\n"
             "If you are reading it, a real break will reach you here too.",
         )
@@ -213,7 +236,7 @@ def failure(episode_id: str | None, stage: str | None, exc: BaseException,
         "This stays on the open list until that stage runs successfully.\n"
         "Once it does, you get a note saying it recovered."
     )
-    _try_send(ch, f"[net-of-fees] broken: {type(exc).__name__} in {where}",
+    _try_send(ch, f"broken: {type(exc).__name__} in {where}",
               "\n".join(parts), log)
 
 
@@ -235,7 +258,7 @@ def recovered(episode_id: str | None, stage: str) -> None:
     if not ch.configured:
         return
     _try_send(
-        ch, f"[net-of-fees] recovered: {stage}",
+        ch, f"recovered: {stage}",
         f"{stage} ran successfully, so this is now closed:\n\n"
         + "\n\n".join(i.describe() for i in closed)
         + "\n\nNothing further to do.",
@@ -258,5 +281,5 @@ def open_issues(hours: int = 24) -> None:
     if not ch.configured:
         return
     count = len(ledger.open_incidents())
-    _try_send(ch, f"[net-of-fees] {count} still broken",
+    _try_send(ch, f"{count} still broken",
               ledger.digest(hours), log)

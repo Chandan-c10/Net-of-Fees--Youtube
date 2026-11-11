@@ -129,7 +129,7 @@ jobs:
           run = ("https://github.com/${{ github.repository }}/actions/runs/"
                  "${{ github.run_id }}")
           ch.send(
-              f"[net-of-fees] draft {ep} is waiting at Gate 1",
+              f"draft {ep} is waiting at Gate 1",
               f"Episode {ep} drafted and passed the secret scan.\n\n"
               f"Download it from the run artifacts:\n  {run}\n\n"
               "Then, locally:\n"

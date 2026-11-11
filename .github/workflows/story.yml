@@ -157,7 +157,7 @@ jobs:
           run = ("https://github.com/${{ github.repository }}/actions/runs/"
                  "${{ github.run_id }}")
           ch.send(
-              f"[net-of-fees] {ep} is rendered and waiting at Gate 2",
+              f"{ep} is rendered and waiting at Gate 2",
               f"The story {ep} has been rendered on GitHub.\n\n"
               f"Watch it:\n  {run}\n\n"
               "Happy with it? Run the `publish` workflow with this id.\n"
