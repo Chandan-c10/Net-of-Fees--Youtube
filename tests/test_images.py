@@ -1035,3 +1035,56 @@ def test_a_successful_redraw_discards_the_old_picture(
 
     assert (sources / "scene_01.png").read_bytes() != stale
     assert not list(sources.glob("*.previous"))
+
+
+# ---- when every generator is out of quota -----------------------------
+
+
+def test_a_scene_no_provider_will_draw_borrows_a_picture(
+        local, episode, story, monkeypatch):
+    """A free generator runs out, and a card of plain text is not a story.
+
+    Every provider returned 402 or 429 on the day this was written, and
+    a published Short showed fifteen scenes of text in place of fifteen
+    pictures. A repeated illustration is a far smaller loss.
+    """
+    from pipeline.config import SHORTS
+
+    open_url, routes = local
+    monkeypatch.delenv("IMAGE_STYLE", raising=False)
+    monkeypatch.setenv("IMAGE_REUSE", "1")
+    # High enough that nothing is reused for merely being similar, so
+    # the refusal is what is under test.
+    monkeypatch.setenv("IMAGE_REUSE_THRESHOLD", "1.0")
+    for scene, prompt in zip(story.scenes,
+                             ("a monkey on a wall", "a woman asleep indoors",
+                              "a harbour at night"), strict=True):
+        scene.image_prompt = prompt
+    # Only the first scene can be drawn; the rest are refused.
+    first = images.prompt_for(story.scenes[0])
+    import urllib.parse
+    routes.routes["/prompt/" + urllib.parse.quote(first, safe="")] = (
+        200, PNG, _png(768, 768))
+
+    result = images.run_for(episode, story, SHORTS, open_url=open_url)
+    assert len(result["made"]) == 1
+    assert len(result["substituted"]) == 2, result
+    assert not result["failed"], "a borrowed scene is not an unavailable one"
+    for scene in story.scenes:
+        assert (episode.dir / "sources" / f"{scene.slug}.png").exists(), (
+            f"{scene.slug} would have rendered as a card of text"
+        )
+
+
+def test_nothing_to_borrow_still_leaves_the_scene_unavailable(
+        local, episode, story, monkeypatch):
+    """Borrowing is a fallback, not a way to hide that nothing worked."""
+    from pipeline.config import SHORTS
+
+    open_url, _routes = local
+    monkeypatch.delenv("IMAGE_STYLE", raising=False)
+    monkeypatch.setenv("IMAGE_REUSE", "1")
+    result = images.run_for(episode, story, SHORTS, open_url=open_url)
+    assert not result["made"]
+    assert not result["substituted"]
+    assert len(result["failed"]) == len(story.scenes)

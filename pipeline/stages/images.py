@@ -112,12 +112,21 @@ def run(ep: Episode, m: Manifest, profile, spec=None,
 
     result = run_for(ep, m, spec or spec_for(profile), profile=profile,
                      force=force)
-    if not result["made"] and not result["kept"]:
+    borrowed = result.get("substituted", [])
+    if not result["made"] and not result["kept"] and not borrowed:
         raise StageError(
             "no scene got a picture. "
             + "; ".join(f"{k}: {v}" for k, v in result["failed"].items())
         )
     m.mark_done("images", **result)
     log.info(f"{len(result['made'])} fetched, {len(result['kept'])} already "
-             f"there, {len(result['failed'])} unavailable")
+             f"there, {len(result['reused'])} reused, {len(borrowed)} "
+             f"borrowed after a provider refused, "
+             f"{len(result['failed'])} unavailable")
+    if borrowed:
+        # Said plainly, because the episode will look finished: every
+        # scene has a picture and some of them are the wrong one.
+        log.warning(f"{len(borrowed)} scene(s) show a borrowed picture "
+                    f"because no provider would draw them. Re-run the "
+                    f"images stage once the quota resets to replace them.")
     return result

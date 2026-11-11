@@ -825,6 +825,10 @@ def run_for(ep, m, spec, profile=None, force: bool = False,
     existing = {c.scene: c for c in load_credits(ep)}
     rows: list[Credit] = []
     made, kept, failed, stale, reused = [], [], {}, [], []
+    substituted: list[str] = []
+    # Scenes no provider could draw. Resolved after the drawing
+    # pass, when this episode's own pictures exist to borrow from.
+    unfilled: list[tuple] = []
     pace = pace_sec()
     sent = 0
     # Read once and extended in memory, so a picture drawn for scene 2
@@ -901,11 +905,11 @@ def run_for(ep, m, spec, profile=None, force: bool = False,
 
         for scene, out, raw, credit, exc in results:
             if exc is not None:
-                # Not fatal: the visuals stage renders a card for a
-                # missing picture, so one unavailable scene costs one
-                # frame rather than the episode.
                 failed[scene.slug] = str(exc)
                 log.warning(f"{scene.slug}: {exc}")
+                if not out.exists():
+                    # Borrow a picture below rather than print a card.
+                    unfilled.append((scene, out, raw))
                 if out.exists():
                     # A redraw that failed leaves the previous picture
                     # in place, which is worth keeping and dangerous to
@@ -949,10 +953,40 @@ def run_for(ep, m, spec, profile=None, force: bool = False,
                            entry.source_url, entry.creator, entry.native))
         log.info(f"{scene.slug} <- library ({score:.0%} match, budget spent)")
 
+    # Scenes no provider would draw. A free generator runs out -- every
+    # one of them returned 402 or 429 on the day this was written -- and
+    # the renderer's answer to a missing picture is a card of plain
+    # text. Fifteen of those in a nineteen-scene story is not a story
+    # anybody watches, and the quota is not going to come back before
+    # the slot does.
+    #
+    # So borrow: this episode's own pictures first, because a scene from
+    # the same story is the closest thing to the one that was wanted,
+    # then the whole library. A repeated illustration is a far smaller
+    # loss than a wall of words, and it is what reuse was built for.
+    for scene, out, raw in unfilled:
+        if not raw or not image_library.enabled():
+            continue
+        match = (image_library.closest(raw, mine) if mine else None) \
+            or (image_library.closest(raw, shelf) if shelf else None)
+        if not match:
+            continue
+        entry, score = match
+        image_library.reuse(entry, out)
+        substituted.append(out.name)
+        failed.pop(scene.slug, None)
+        rows.append(Credit(scene.index, entry.provider or "library",
+                           entry.license or "generated",
+                           entry.source_url, entry.creator, entry.native))
+        log.warning(f"{scene.slug} <- library ({score:.0%} match): no "
+                    f"provider would draw it, so it borrows a picture "
+                    f"rather than showing a card of text")
+
     if rows:
         save_credits(ep, rows)
     return {
         "made": made, "kept": kept, "reused": reused,
+        "substituted": substituted,
         "failed": failed, "stale": stale,
         "size": f"{width}x{height}",
         "max_new": budget,
