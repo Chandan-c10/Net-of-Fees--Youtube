@@ -14,10 +14,26 @@ DEFAULT_VOICE = "chandan_en"
 MOTION = "kenburns"
 
 # Instagram weights the leading tags most heavily.
+# Ordered by how people actually search for this, most specific first.
+# YouTube shows the first three above the title, so those three have to
+# earn their place: they name the collection, the kind of story, and
+# who it is for.
 HASHTAGS = (
-    "#storytime", "#history", "#didyouknow", "#folklore", "#explainer",
-    "#reels", "#documentary", "#mythology", "#whatif", "#facts",
+    "#panchatantra", "#moralstories", "#storiesforkids",
+    "#bedtimestories", "#kidsstories", "#shortstories",
+    "#moralstory", "#englishstories", "#animalstories",
+    "#storytime", "#fables", "#storiesinenglish",
 )
+
+# Appended to the title, because a title that says only "The Monkey and
+# the Crocodile" competes with every other telling of it. The suffix is
+# what somebody actually types.
+TITLE_SUFFIX = "Panchatantra Stories for Kids | Moral Story in English"
+
+# Named in the description. Traditional tales are public domain, and
+# saying which collection a story comes from is both honest and the
+# phrase people search.
+STORY_SOURCE = "Panchatantra"
 
 YOUTUBE_CATEGORY_ID = "27"
 LANGUAGE = "en"

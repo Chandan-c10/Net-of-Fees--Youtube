@@ -73,10 +73,17 @@ def _has(data: dict, *keys: str) -> bool:
     return all(key in data for key in keys)
 
 
-def _titles(data: dict, m: Manifest) -> list[TitleCandidate]:
+def _titles(data: dict, m: Manifest, profile=None) -> list[TitleCandidate]:
     """Build candidates from figures in the snapshot. Never invents one."""
     out: list[TitleCandidate] = []
-    recipe = data.get("recipe")
+    # A recipe's titles are built from its figures, and a picture
+    # profile is not rendering those figures -- it is telling a story
+    # whose name it already has. Without this, "The Monkey and the
+    # Crocodile" went out titled "8 bugs. My tests caught 1."
+    binds = True
+    if profile is not None:
+        binds = getattr(profile.visuals, "binds_data_keys", lambda: True)()
+    recipe = data.get("recipe") if binds else None
 
     if recipe == "incident_log" and _has(
             data, "total", "caught_by_tests", "median_days_hidden",
@@ -118,12 +125,89 @@ def _titles(data: dict, m: Manifest) -> list[TitleCandidate]:
                 f"figures ({sorted(data)}) and the episode has no title "
                 "of its own. Set a title, or re-run the export stage."
             )
-        out.append(TitleCandidate(title, "fallback"))
+        suffix = getattr(profile, "TITLE_SUFFIX", "") if profile else ""
+        if suffix and len(title) + len(suffix) + 3 <= 100:
+            # "The Monkey and the Crocodile" competes with every other
+            # telling of it. The suffix is what somebody actually types
+            # into the search box, and it still has to fit in 100.
+            out.append(TitleCandidate(f"{title} | {suffix}",
+                                      "the name plus what people search"))
+        out.append(TitleCandidate(title, "the name alone"))
     return out
+
+
+def _story_description(m: Manifest, profile, credits: list[str] | None,
+                       moral: str = "") -> str:
+    """The description for a story, written for how stories are found.
+
+    A chart video is found by its figure; a story is found by its name
+    and its kind. Somebody searching types "panchatantra stories for
+    kids" or "moral stories in english", not a number -- so the first
+    two lines, which are the only ones YouTube shows in search and
+    above the fold, say what the story is and who it is for.
+
+    The moral is included on purpose. For this category it is a large
+    part of why people search at all: a parent looking for a bedtime
+    story wants to know what it teaches before they play it.
+    """
+    title = m.title or "this story"
+    parts = [
+        f"{title} — a classic story with a moral, told simply.",
+        "",
+    ]
+    if moral:
+        parts += [f"Moral of the story: {moral}", ""]
+
+    retold = getattr(profile, "STORY_SOURCE", "")
+    if retold:
+        parts += [
+            f"A retelling of a traditional tale from the {retold}, "
+            "one of the oldest collections of fables in the world.",
+            "",
+        ]
+    if m.series:
+        n = f" — episode {m.series_episode}" if m.series_episode else ""
+        parts += [f"Part of the series: {m.series}{n}", ""]
+
+    parts += [
+        "Stories like this one have been told for well over two thousand "
+        "years, and they have lasted because the lesson in them is still "
+        "true. New stories every week.",
+        "",
+        "Subscribe if you would like more.",
+        "",
+    ]
+    if credits:
+        parts += [*credits, ""]
+    parts += [profile.style.DISCLAIMER, ""]
+    parts.append(" ".join(hashtags({}, profile)))
+    return "\n".join(parts)
+
+
+def moral_of(m: Manifest) -> str:
+    """The moral, if the last scene states one.
+
+    Taken from the script rather than invented, because a moral the
+    narrator never says is one the description should not claim.
+    """
+    for scene in reversed(m.scenes):
+        text = scene.text.strip()
+        low = text.lower()
+        for lead in ("the moral of the story.", "the moral of the story:",
+                     "moral of the story.", "moral of the story:",
+                     "the moral of this story is", "the moral is"):
+            if low.startswith(lead):
+                return text[len(lead):].strip(" .:—-") or ""
+    return ""
 
 
 def _description(data: dict, m: Manifest, profile, hook: str,
                  credits: list[str] | None = None) -> str:
+    # A story is found by its name and its kind, not by a figure.
+    binds = getattr(profile.visuals, "binds_data_keys", lambda: True)()
+    if not binds:
+        return _story_description(m, profile, credits, moral_of(m))
+
     parts = [hook, ""]
     if m.series:
         n = f" (episode {m.series_episode})" if m.series_episode else ""
@@ -193,7 +277,7 @@ def run(ep: Episode, m: Manifest, profile) -> dict:
         raise StageError("no scenes; run the script stage first")
     data = load_snapshot(ep)
 
-    candidates = _titles(data, m)
+    candidates = _titles(data, m, profile)
     blocking = [w for c in candidates for w in c.warnings if "ADVISORY" in w]
     if blocking:
         raise StageError("title candidates contain advisory language: " + "; ".join(blocking))

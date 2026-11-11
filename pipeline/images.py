@@ -546,7 +546,15 @@ def from_cloudflare(prompt: str, width: int, height: int, seed: int,
                       "@cf/black-forest-labs/flux-1-schnell")
     url = (f"https://api.cloudflare.com/client/v4/accounts/{account}"
            f"/ai/run/{model}")
-    payload = json.dumps({"prompt": prompt, "seed": seed % 4294967295}).encode()
+    # Prompt and steps only. flux-1-schnell refuses anything else
+    # outright -- "Additional or unevaluated properties '/seed' not
+    # allowed" -- so a seed cannot be passed and the picture is not
+    # reproducible on this provider. The library is what makes a scene
+    # stable across runs; this is where that stops being a nicety.
+    payload = json.dumps({
+        "prompt": prompt,
+        "steps": int(os.getenv("CLOUDFLARE_IMAGE_STEPS", "4")),
+    }).encode()
     body, _kind = _open_patiently(
         open_url, url, payload,
         {"Authorization": f"Bearer {token}",
@@ -580,10 +588,18 @@ def from_huggingface(prompt: str, width: int, height: int, seed: int,
     if not token:
         raise StageError("huggingface needs HUGGINGFACE_TOKEN")
     model = os.getenv("HUGGINGFACE_IMAGE_MODEL",
-                      "black-forest-labs/FLUX.1-schnell")
-    payload = json.dumps({"inputs": prompt}).encode()
+                      "stabilityai/stable-diffusion-3-medium-diffusers")
+    payload = json.dumps({
+        "inputs": prompt,
+        "parameters": {"width": _dim(width), "height": _dim(height),
+                       "negative_prompt": NEGATIVE, "seed": seed % 2147483647},
+    }).encode()
+    # router.huggingface.co, not api-inference: the old host stopped
+    # resolving when Inference Providers replaced the serverless API,
+    # and a DNS failure is an unhelpful way to learn that.
     body, kind = _open_patiently(
-        open_url, f"https://api-inference.huggingface.co/models/{model}",
+        open_url,
+        f"https://router.huggingface.co/hf-inference/models/{model}",
         payload, {"Authorization": f"Bearer {token}",
                   "Content-Type": "application/json"})
     if not body.startswith((b"\x89PNG", b"\xff\xd8\xff", b"RIFF")):

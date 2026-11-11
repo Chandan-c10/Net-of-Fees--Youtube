@@ -19,10 +19,14 @@ DEFAULT_VOICE = "chandan_en"
 MOTION = "kenburns"
 
 HASHTAGS = (
-    "#storytime", "#history", "#folklore", "#documentary", "#explainer",
-    "#didyouknow", "#mythology", "#whatif", "#shortdocumentary",
-    "#narration", "#archive", "#factsdaily",
+    "#panchatantra", "#moralstories", "#storiesforkids",
+    "#bedtimestories", "#kidsstories", "#shortstories",
+    "#moralstory", "#englishstories", "#animalstories",
+    "#storytime", "#fables", "#storiesinenglish",
 )
+
+TITLE_SUFFIX = "Panchatantra Stories for Kids | Moral Story in English"
+STORY_SOURCE = "Panchatantra"
 
 # 27 = Education. A narrated explainer is education, not entertainment,
 # and the category is a separate field from the tags.
