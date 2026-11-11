@@ -1088,3 +1088,46 @@ def test_nothing_to_borrow_still_leaves_the_scene_unavailable(
     assert not result["made"]
     assert not result["substituted"]
     assert len(result["failed"]) == len(story.scenes)
+
+
+def test_borrowed_pictures_are_not_all_the_same_one(
+        local, episode, story, monkeypatch, tmp_path):
+    """Fourteen of nineteen scenes once showed the identical drawing.
+
+    Taking the best match for each scene independently converges on one
+    picture when the prompts are all from the same story. A sequence of
+    different moments has to look like different moments.
+    """
+    from pipeline import image_library
+    from pipeline.config import SHORTS
+
+    open_url, _routes = local
+    monkeypatch.delenv("IMAGE_STYLE", raising=False)
+    monkeypatch.setenv("IMAGE_REUSE", "1")
+    monkeypatch.setenv("IMAGE_REUSE_THRESHOLD", "1.0")   # nothing matches
+
+    # A library of distinct pictures, none a close match for any scene.
+    for i, prompt in enumerate(("a cart in the rain", "a cart at dusk",
+                                "a cart on a hill", "a cart by a river")):
+        picture = tmp_path / f"stored_{i}.png"
+        # Each a different size, so "did this scene get a different
+        # picture?" is answerable from the bytes on disk.
+        picture.write_bytes(_png(768, 768 + i * 16))
+        image_library.add(prompt, picture, {"provider": "test"}, "768x768")
+
+    for scene in story.scenes:
+        scene.image_prompt = "a cart somewhere"
+
+    result = images.run_for(episode, story, SHORTS, open_url=open_url)
+    assert len(result["substituted"]) == len(story.scenes)
+    import hashlib
+    digests = {
+        hashlib.sha256(
+            (episode.dir / "sources" / f"{s.slug}.png").read_bytes()
+        ).hexdigest()
+        for s in story.scenes
+    }
+    assert len(digests) == len(story.scenes), (
+        f"{len(story.scenes)} scenes borrowed only {len(digests)} distinct "
+        f"picture(s); the library had four to choose from"
+    )

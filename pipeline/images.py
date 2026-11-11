@@ -964,14 +964,24 @@ def run_for(ep, m, spec, profile=None, force: bool = False,
     # the same story is the closest thing to the one that was wanted,
     # then the whole library. A repeated illustration is a far smaller
     # loss than a wall of words, and it is what reuse was built for.
+    #
+    # Never the same picture twice while an unused one is left. The
+    # first version took the best match for each scene independently
+    # and handed fourteen of nineteen scenes the identical drawing,
+    # which is not an improvement on the text it replaced: a story is
+    # a sequence of different moments.
+    taken: set[str] = {e.file for e in mine}
     for scene, out, raw in unfilled:
         if not raw or not image_library.enabled():
             continue
-        match = (image_library.closest(raw, mine) if mine else None) \
-            or (image_library.closest(raw, shelf) if shelf else None)
+        pool = [e for e in (mine + shelf) if e.file not in taken]
+        if not pool:
+            pool = mine + shelf          # everything is spoken for
+        match = image_library.closest(raw, pool) if pool else None
         if not match:
             continue
         entry, score = match
+        taken.add(entry.file)
         image_library.reuse(entry, out)
         substituted.append(out.name)
         failed.pop(scene.slug, None)
