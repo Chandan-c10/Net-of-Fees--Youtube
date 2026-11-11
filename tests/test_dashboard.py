@@ -468,3 +468,49 @@ def test_a_genuinely_cross_site_post_is_still_refused(server):
     status, _loc = post(base, "/settings", {"R2_BUCKET": "x"},
                         headers={"Origin": "http://evil.example"})
     assert status == 403
+
+
+def test_credential_fields_are_styled(server):
+    """Every credential field is a password input. Styling only
+    input[type=text] left each one an unstyled white box on a dark
+    page -- the fields that matter most looked the most broken."""
+    base, _ep, _m = server
+    _status, body = get(base, "/settings")
+    page = body.decode()
+    assert 'type="password"' in page, "no credential fields on the page"
+    assert "input[type=password]" in page, "password inputs are unstyled"
+
+
+def test_no_two_settings_sections_share_a_name(server):
+    from pipeline.dashboard import SETTING_GROUPS
+
+    names = [title for title, _note, _fields in SETTING_GROUPS]
+    assert len(names) == len(set(names)), f"duplicate section: {names}"
+
+
+def test_a_published_episode_is_not_failed_by_a_later_rerun():
+    """Three videos that were live on the channel sat at the top of the
+    needs-you list marked "failed", because a re-render afterwards
+    broke. Published outranks a later failure."""
+    from pipeline.dashboard import standing_of
+
+    summary = {
+        "stages": {"assemble": "failed"},
+        "published": True, "gate_1": True, "gate_2": True,
+        "gate_1_blockers": [], "gate_2_blockers": [],
+    }
+    standing = standing_of(summary, running=False)
+    assert standing.group == "done"
+    # Still said, because a broken re-run is worth knowing about.
+    assert "assemble" in standing.detail
+
+
+def test_an_unpublished_failure_still_needs_you():
+    from pipeline.dashboard import standing_of
+
+    summary = {
+        "stages": {"assemble": "failed"},
+        "published": False, "gate_1": True, "gate_2": False,
+        "gate_1_blockers": [], "gate_2_blockers": [],
+    }
+    assert standing_of(summary, running=False).group == "needs_you"

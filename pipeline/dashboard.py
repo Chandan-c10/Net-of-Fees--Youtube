@@ -411,12 +411,22 @@ def standing_of(summary: dict, running: bool) -> Standing:
 
     failed = [name for name, state in summary["stages"].items()
               if state == "failed"]
+
+    # Published outranks a later failure. An episode that is live on the
+    # channel is not "failed" because a re-render broke afterwards, and
+    # saying so sent three live videos to the top of the needs-you list
+    # as if nothing had gone out. The failure is still named, because a
+    # broken re-run is worth knowing about -- it is just not the
+    # headline.
+    if summary["published"]:
+        if failed:
+            return Standing("done", "live",
+                            f"live; a later {failed[0]} run failed", 0)
+        return Standing("done", "published", "live", 0)
+
     if failed:
         return Standing("needs_you", "failed",
                         f"{failed[0]} stopped; it needs a person", FAILED)
-
-    if summary["published"]:
-        return Standing("done", "published", "live", 0)
 
     if summary["gate_2"]:
         return Standing("needs_you", "ready to publish",
@@ -564,9 +574,14 @@ pre.log{max-height:330px;overflow:auto;background:#101216;color:#d6d6d0;
 .kv dt{color:var(--muted)}
 .kv dd{margin:0;word-break:break-word}
 label{display:block;font-size:13px;color:var(--muted);margin:0 0 4px}
-select,input[type=text]{font:inherit;font-size:15px;padding:9px 11px;
-  border-radius:8px;border:1px solid var(--line);background:var(--card);
-  color:var(--ink);min-width:160px}
+/* password as well as text: every credential field is a password
+   input, so styling only text left each one an unstyled white box on a
+   dark page -- the fields that matter most looked the most broken. */
+select,input[type=text],input[type=password]{font:inherit;font-size:15px;
+  padding:9px 11px;border-radius:8px;border:1px solid var(--line);
+  background:var(--card);color:var(--ink);min-width:160px}
+input[type=text]:focus,input[type=password]:focus,select:focus{
+  outline:2px solid var(--accent);outline-offset:1px}
 .fields{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
 .spin{display:inline-block;width:11px;height:11px;border-radius:50%;
   border:2px solid var(--line);border-top-color:var(--accent);
@@ -817,7 +832,7 @@ SETTING_GROUPS = (
      ("R2_ACCOUNT_ID", "R2_BUCKET", "R2_ACCESS_KEY_ID",
       "R2_SECRET_ACCESS_KEY", "R2_PUBLIC_BASE_URL",
       "R2_STORAGE_CAP_GB", "R2_RETAIN_DAYS")),
-    ("Disk", "0 keeps everything. A video is only ever removed once it "
+    ("Keeping files", "0 keeps everything. A video is only ever removed once it "
              "is published or archived \u2014 an unpublished one is the "
              "only copy of work you have not judged yet.",
      ("RETAIN_WORKING_DAYS", "RETAIN_VIDEO_DAYS")),

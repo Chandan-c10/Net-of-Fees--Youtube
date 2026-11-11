@@ -106,7 +106,17 @@ DEFAULT_PROVIDERS = ("cloudflare", "together", "huggingface", "pollinations")
 # Appended to every prompt so a single episode's pictures look like they
 # came from one hand. Overridable per profile and per run.
 DEFAULT_STYLE = ("cinematic still, natural light, shallow depth of "
-                 "field, muted colour, photographic, no text")
+                 "field, muted colour, photographic")
+
+# Added to every prompt, whatever the style.
+#
+# Cloudflare's flux-1-schnell takes a prompt and a step count and
+# nothing else -- no negative prompt -- so everything that would have
+# been a negative has to be said positively here instead. These are the
+# mistakes that actually came back: lettering across the frame, and a
+# second animal the prompt never asked for.
+GUARDS = ("clean illustration with no text, no letters, no words, "
+          "no watermark, no signature, no border")
 
 # Asked for in the negative. "No text" in the positive prompt is widely
 # ignored; a caption burnt into a generated picture is unfixable.
@@ -247,7 +257,7 @@ def prompt_for(scene, profile=None) -> str:
             "The script stage writes one per scene; re-run it, or fill "
             "sources/ by hand."
         )
-    return f"{base}. {style_suffix(profile)}".strip()
+    return f"{base}. {style_suffix(profile)}. {GUARDS}".strip()
 
 
 # ---- transport --------------------------------------------------------

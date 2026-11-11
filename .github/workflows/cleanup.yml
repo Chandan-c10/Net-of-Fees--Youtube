@@ -1,0 +1,105 @@
+name: cleanup
+
+# Expiry that actually happens.
+#
+# The retention settings existed and nothing ever enforced them:
+# `archive --prune` was a command somebody had to remember to type, so
+# 536 MB of reproducible working files sat on a laptop for weeks and
+# the bucket kept every video it had ever been given.
+#
+# Daily, well after both publish slots, so a video is never removed in
+# the hour it was meant to go out.
+#
+# What it can and cannot delete is decided in pipeline/archive.py, not
+# here: a video goes only once the episode has actually been posted,
+# and record/ and library/ never expire at all. A schedule that could
+# decide those things would be a schedule that could lose work.
+
+on:
+  schedule:
+    - cron: "30 20 * * *"   # 02:00 IST, after both slots
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report what would go, delete nothing"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+jobs:
+  expire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_STORAGE_CAP_GB: ${{ vars.R2_STORAGE_CAP_GB }}
+      R2_RETAIN_DAYS: ${{ vars.R2_RETAIN_DAYS }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
+      ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: What the bucket holds
+        run: python run.py archive
+
+      - name: Expire what has gone out and is past its age
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            python run.py archive --prune --dry-run
+          else
+            python run.py archive --prune
+          fi
+
+      - name: What is left
+        if: always()
+        run: python run.py archive
+
+      - name: Say so if the bucket is filling up
+        if: always()
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          from pipeline import archive, notify
+          target = archive.Target()
+          if not target.configured:
+              print("storage not configured; nothing to report")
+              raise SystemExit(0)
+          plan = archive.budget(0, target)
+          if not plan["capped"] or plan["percent"] < 80:
+              print(f"bucket at {plan.get('percent', 0):.0f}%; nothing to say")
+              raise SystemExit(0)
+          ch = notify.Channel()
+          if not ch.configured:
+              print("alerts not configured")
+              raise SystemExit(0)
+          # Warned while there is still room to act, rather than when
+          # the next upload is refused.
+          ch.send(
+              "[net-of-fees] the archive bucket is filling up",
+              f"{plan['used'] / 1e9:.2f} GB of {plan['limit'] / 1e9:.2f} GB "
+              f"({plan['percent']:.0f}%).\n\n"
+              "Uploads stop at the cap rather than start charging, so "
+              "nothing will be billed -- but nothing new will be stored "
+              "either. Lower R2_RETAIN_DAYS, or raise the cap if you are "
+              "willing to pay past the free tier.",
+          )
+          print("warned", ch.to)
+          PY

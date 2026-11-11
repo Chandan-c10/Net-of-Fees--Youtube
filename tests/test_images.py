@@ -985,3 +985,53 @@ def test_redrawing_a_scene_that_does_not_exist_says_so(episode, story):
 
     with pytest.raises(StageError, match="no scene"):
         stage.redraw(episode, story, [99])
+
+
+def test_a_redraw_that_cannot_draw_puts_the_picture_back(
+        episode, story, local, monkeypatch):
+    """Clearing 91 pictures and getting 38 back turned two finished
+    episodes into title cards. Nothing is removed that cannot be
+    replaced."""
+    from pipeline.stages import images as stage
+
+    open_url, _routes = local          # nothing registered: every draw fails
+    sources = episode.dir / "sources"
+    sources.mkdir(parents=True, exist_ok=True)
+    original = _png()
+    for scene in story.scenes:
+        (sources / f"{scene.slug}.png").write_bytes(original)
+
+    stage.redraw(episode, story, [1, 2, 3])
+    # Set aside, not gone.
+    assert not (sources / "scene_01.png").exists()
+    assert (sources / "scene_01.png.previous").exists()
+
+    from pipeline.config import SHORTS
+    images.run_for(episode, story, SHORTS, open_url=open_url)
+    stage.restore_set_aside(episode)
+
+    for scene in story.scenes:
+        assert (sources / f"{scene.slug}.png").read_bytes() == original
+    assert not list(sources.glob("*.previous"))
+
+
+def test_a_successful_redraw_discards_the_old_picture(
+        episode, story, local, monkeypatch):
+    from pipeline.config import SHORTS
+    from pipeline.stages import images as stage
+
+    open_url, routes = local
+    monkeypatch.delenv("IMAGE_STYLE", raising=False)
+    _serve_generated(routes, story)
+    sources = episode.dir / "sources"
+    sources.mkdir(parents=True, exist_ok=True)
+    stale = _png(800, 800)
+    for scene in story.scenes:
+        (sources / f"{scene.slug}.png").write_bytes(stale)
+
+    stage.redraw(episode, story, [1])
+    images.run_for(episode, story, SHORTS, open_url=open_url)
+    stage.restore_set_aside(episode)
+
+    assert (sources / "scene_01.png").read_bytes() != stale
+    assert not list(sources.glob("*.previous"))

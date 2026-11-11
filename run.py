@@ -112,8 +112,14 @@ def _run_stage(name: str, ep: Episode, m: Manifest, settings, args) -> None:
                     f"--redraw takes scene numbers, e.g. 3,14 (got {wanted!r})"
                 ) from None
             images.redraw(ep, m, scenes)
-        images.run(ep, m, profile,
-                   force=getattr(args, "refetch_images", False))
+        try:
+            images.run(ep, m, profile,
+                       force=getattr(args, "refetch_images", False))
+        finally:
+            if wanted:
+                # Whatever happened, a scene whose replacement never
+                # arrived keeps the picture it had.
+                images.restore_set_aside(ep)
     elif name == "charts":
         charts.run(ep, m, profile, spec)
     elif name == "captions":

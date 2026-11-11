@@ -2,13 +2,13 @@
 
 [SCENE 1 | voice: chandan_en]
 
-IMAGE: a mighty lion standing on a rock in a green Indian forest, proud and powerful, storybook illustration, wide shot
+IMAGE: one single mighty lion, alone, standing on a rock in a green Indian forest, proud and powerful, storybook illustration, wide shot
 
 Once upon a time, there lived a mighty lion in a forest.
 
 [SCENE 2 | voice: chandan_en]
 
-IMAGE: the lion roaring in a forest clearing, deer and birds fleeing in the background, storybook illustration, wide shot
+IMAGE: one single lion, alone, roaring in a forest clearing, deer and birds fleeing in the background, storybook illustration, wide shot
 
 He was very powerful, and he killed many animals every day for his food.
 
@@ -38,13 +38,13 @@ IMAGE: an old deer speaking to the lion while other animals wait behind, storybo
 
 [SCENE 7 | voice: chandan_en]
 
-IMAGE: the lion seated on his rock, nodding slowly, pleased with the arrangement, storybook illustration, medium shot
+IMAGE: one single lion, alone, seated on his rock, nodding slowly, pleased with the arrangement, storybook illustration, medium shot
 
 The lion liked this idea. He agreed to their request.
 
 [SCENE 8 | voice: chandan_en]
 
-IMAGE: a small white rabbit standing alone on a forest path, looking up, thoughtful, storybook illustration, medium shot
+IMAGE: one single small white rabbit, alone, standing alone on a forest path, looking up, thoughtful, storybook illustration, medium shot
 
 One day, it was a little rabbit's turn to go to the lion.
 
@@ -56,13 +56,13 @@ The rabbit was very clever. He decided to teach the lion a lesson.
 
 [SCENE 10 | voice: chandan_en]
 
-IMAGE: the rabbit walking very slowly along a sunlit forest path, taking his time, storybook illustration, wide shot
+IMAGE: one single rabbit, alone, walking very slowly along a sunlit forest path, taking his time, storybook illustration, wide shot
 
 He walked slowly. He stopped often. He reached the lion's den very late.
 
 [SCENE 11 | voice: chandan_en]
 
-IMAGE: the lion standing at the mouth of his den, furious, roaring down at the tiny rabbit, storybook illustration, medium shot
+IMAGE: one single lion, alone, standing at the mouth of his den, furious, roaring down at the tiny rabbit, storybook illustration, medium shot
 
 The lion became angry and roared, "Why are you so late?"
 
@@ -74,19 +74,19 @@ The rabbit replied politely, "O King! On my way, I met another lion."
 
 [SCENE 13 | voice: chandan_en]
 
-IMAGE: the rabbit gesturing back down the forest path as he speaks, the lion listening, storybook illustration, medium shot
+IMAGE: one single rabbit, alone, gesturing back down the forest path as he speaks, the lion listening, storybook illustration, medium shot
 
 "He stopped me. He said that he was the real king of this forest."
 
 [SCENE 14 | voice: chandan_en]
 
-IMAGE: the lion rearing up in rage, mane flying, teeth bared, storybook illustration, medium shot
+IMAGE: one single lion, alone, rearing up in rage, mane flying, teeth bared, storybook illustration, medium shot
 
 The lion became furious. "Show me that lion!" he shouted.
 
 [SCENE 15 | voice: chandan_en]
 
-IMAGE: the rabbit leading the angry lion along a forest path, the lion following close behind, storybook illustration, wide shot
+IMAGE: one single rabbit, alone, leading the angry lion along a forest path, the lion following close behind, storybook illustration, wide shot
 
 The clever rabbit took the lion deep into the forest.
 
@@ -98,7 +98,7 @@ At last they came to a deep well.
 
 [SCENE 17 | voice: chandan_en]
 
-IMAGE: the rabbit pointing into the well, the lion leaning over the stone edge to look, storybook illustration, medium shot
+IMAGE: one single rabbit, alone, pointing into the well, the lion leaning over the stone edge to look, storybook illustration, medium shot
 
 He pointed inside and said, "Look, Your Majesty! He is in there."
 
@@ -110,13 +110,13 @@ The lion looked into the well and saw his own reflection in the water.
 
 [SCENE 19 | voice: chandan_en]
 
-IMAGE: the lion roaring down into the well, his reflection roaring back up, storybook illustration, close-up
+IMAGE: one single lion, alone, roaring down into the well, his reflection roaring back up, storybook illustration, close-up
 
 Thinking it was another lion, he roared loudly. His reflection roared back.
 
 [SCENE 20 | voice: chandan_en]
 
-IMAGE: the lion leaping over the edge down into the stone well, the rabbit watching from a safe distance, storybook illustration, wide shot
+IMAGE: one single lion, alone, leaping over the edge down into the stone well, the rabbit watching from a safe distance, storybook illustration, wide shot
 
 In great anger, the lion jumped into the well to fight his enemy.
 

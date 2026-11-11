@@ -53,7 +53,13 @@ def redraw(ep: Episode, m: Manifest, scenes: list[int], log=None) -> list[int]:
     gone = []
     for index in sorted(set(scenes)):
         picture = ep.dir / "sources" / f"scene_{index:02d}.png"
-        picture.unlink(missing_ok=True)
+        # Moved aside, not deleted. A redraw that cannot reach the
+        # generator -- a daily quota spent, a service down -- must not
+        # leave the episode worse than it found it. Clearing 91
+        # pictures and getting 38 back turned two finished episodes
+        # into title cards.
+        if picture.exists():
+            picture.replace(picture.with_suffix(".png.previous"))
         scene = next(s for s in m.scenes if s.index == index)
         raw = (getattr(scene, "image_prompt", "") or "").strip()
         for entry in shelf:
@@ -62,8 +68,30 @@ def redraw(ep: Episode, m: Manifest, scenes: list[int], log=None) -> list[int]:
         gone.append(index)
     # Re-read, so the index loses the rows whose files have just gone.
     image_library.save(image_library.load())
-    log.info(f"cleared {len(gone)} picture(s): {gone}")
+    log.info(f"set aside {len(gone)} picture(s) to redraw: {gone}")
     return gone
+
+
+def restore_set_aside(ep: Episode, log=None) -> list[int]:
+    """Put back any picture a redraw could not replace.
+
+    Called after the drawing, so a scene whose replacement never
+    arrived keeps the picture it had. Nothing is removed that cannot be
+    replaced -- the same rule the retention code follows for videos.
+    """
+    log = log or get(None, "images")
+    back = []
+    for previous in sorted((ep.dir / "sources").glob("*.png.previous")):
+        target = previous.with_suffix("")
+        if target.exists():
+            previous.unlink(missing_ok=True)      # the redraw worked
+            continue
+        previous.replace(target)
+        back.append(int(target.stem.split("_")[-1]))
+    if back:
+        log.warning(f"{len(back)} picture(s) could not be redrawn and were "
+                    f"put back: {back}")
+    return back
 
 
 def run(ep: Episode, m: Manifest, profile, spec=None,

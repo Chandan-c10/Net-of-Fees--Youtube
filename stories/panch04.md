@@ -20,7 +20,7 @@ The forest grew thicker as they walked. The path grew narrow.
 
 [SCENE 4]
 
-IMAGE: a large brown bear stepping out of the trees onto the path ahead of them, storybook illustration, wide shot
+IMAGE: one single large brown bear, alone, stepping out of the trees onto the path ahead of them, storybook illustration, wide shot
 
 Suddenly, they saw a big bear coming towards them.
 
@@ -68,19 +68,19 @@ The bear came near him.
 
 [SCENE 12]
 
-IMAGE: the bear lowering its head to sniff at the man's face and ear, storybook illustration, close-up
+IMAGE: one single bear, alone, lowering its head to sniff at the man's face and ear, storybook illustration, close-up
 
 It sniffed his face. It sniffed his ears.
 
 [SCENE 13]
 
-IMAGE: the bear turning away, the man still lying motionless, storybook illustration, medium shot
+IMAGE: one single bear, alone, turning away, the man still lying motionless, storybook illustration, medium shot
 
 The bear thought he was dead.
 
 [SCENE 14]
 
-IMAGE: the bear walking away into the trees, the forest quiet again, storybook illustration, wide shot
+IMAGE: one single bear, alone, walking away into the trees, the forest quiet again, storybook illustration, wide shot
 
 After some time, it went away.
 
