@@ -96,3 +96,65 @@ def test_a_batched_episode_is_not_publishable_until_approved():
     m.publish_after = (datetime.now(CHANNEL_TZ) - timedelta(hours=1)).isoformat()
     assert m.approved_at is None
     assert schedule.due_episodes([m]) == [], "unapproved, so not due"
+
+
+# ---- the story queue --------------------------------------------------
+
+
+def test_only_list_items_are_titles(tmp_path):
+    """The first version read the instructions at the top of the file as
+    four stories, and would have made a video called "One title per
+    line"."""
+    from pipeline import queue
+
+    q = tmp_path / "QUEUE.md"
+    q.write_text(
+        "# Story queue\n\nOne title per line. Add freely.\n\n"
+        "## Panchatantra\n\n- The Blue Jackal\n- The Talkative Tortoise\n")
+    assert queue.titles(q) == ["The Blue Jackal", "The Talkative Tortoise"]
+
+
+def test_a_title_already_made_is_skipped(tmp_path):
+    """Read from the manifests, because a second list of what is done is
+    a second place for the truth to live."""
+    import json
+
+    from pipeline import queue
+
+    q = tmp_path / "QUEUE.md"
+    q.write_text("- The Blue Jackal\n- The Talkative Tortoise\n")
+    episodes = tmp_path / "episodes"
+    (episodes / "e1").mkdir(parents=True)
+    (episodes / "e1" / "manifest.json").write_text(json.dumps(
+        {"title": "The Blue Jackal | Panchatantra Stories for Kids"}))
+
+    assert queue.remaining(q, episodes) == ["The Talkative Tortoise"]
+    assert queue.next_title(q, episodes) == "The Talkative Tortoise"
+
+
+def test_an_empty_queue_is_reported_not_ignored(tmp_path):
+    """Running out of titles is the one way the channel stops."""
+    import json
+
+    from pipeline import queue
+
+    q = tmp_path / "QUEUE.md"
+    q.write_text("- The Blue Jackal\n")
+    episodes = tmp_path / "episodes"
+    (episodes / "e1").mkdir(parents=True)
+    (episodes / "e1" / "manifest.json").write_text(
+        json.dumps({"title": "The Blue Jackal"}))
+
+    report = queue.report(q, episodes)
+    assert report["exhausted"] is True
+    assert report["next"] is None
+
+
+def test_an_id_is_stable_for_a_title():
+    """The same story asked for twice lands on the same episode."""
+    from pipeline import queue
+
+    first = queue.episode_id_for("The Blue Jackal")
+    assert first == queue.episode_id_for("the  blue   jackal")
+    assert first != queue.episode_id_for("The Talkative Tortoise")
+    assert "/" not in first and " " not in first

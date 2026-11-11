@@ -19,7 +19,7 @@ from ..manifest import Episode, Manifest
 from ..script_format import parse, render, to_scenes, validate_against_snapshot
 from .export import load_snapshot
 
-ENGINES = ("file", "template", "gemini", "ollama")
+ENGINES = ("file", "story", "template", "gemini", "ollama")
 
 # One deterministic template per recipe. Registered at the bottom of this
 # module, once every builder is defined.
@@ -32,6 +32,8 @@ def run(ep: Episode, m: Manifest, engine: str = "template", profile=None) -> Non
 
     if engine == "file":
         text = _from_file(ep)
+    elif engine == "story":
+        text = _from_story(m, profile)
     elif engine == "template":
         builder = TEMPLATES.get(data.get("recipe", ""))
         if builder is None:
@@ -215,6 +217,105 @@ def story_path(episode_id: str) -> Path:
     return STORIES_DIR / f"{episode_id}.md"
 
 
+# What a model has to be told to write one of these well.
+#
+# Taken from the tellings the user chose as the standard, and from four
+# rounds of getting it wrong: first too literary, then too terse, then
+# describing what the picture already shows. The register is a
+# children's fable told plainly, because the pictures carry the scene
+# and the words carry the story.
+STORY_CONTRACT = """
+You are writing a short narrated story for a video. The viewer sees an
+illustration for every line, so the words carry the STORY and never
+describe the scenery.
+
+TELLING
+
+- Open with "Once upon a time" or an equally plain opening. No preamble,
+  no "in this video", no addressing the viewer.
+- Short, plain sentences. This is heard once, not read.
+- Use dialogue. "O King!" said the rabbit. It carries character faster
+  than description.
+- Do not describe what the picture shows. The image already shows the
+  green forest; the narration says what happened in it.
+- No literary flourish, no interiority, no long clauses. A child should
+  follow it easily and an adult should not wince.
+- End with the moral, stated in exactly this form, as its own scene:
+  "The moral of the story. <the lesson>."
+
+SHAPE
+
+- Between 18 and 32 scenes.
+- One or two short sentences per scene. Roughly 8 to 14 words.
+- Every scene gets its own IMAGE line.
+
+FORMAT, exactly
+
+# <Story title>
+
+[SCENE 1]
+
+IMAGE: <what this scene shows>
+
+<the narration for this scene>
+
+[SCENE 2]
+
+IMAGE: ...
+
+PICTURES
+
+- Say what is visible: who, where, doing what, and the feeling on their
+  face. Name the shot: close-up, medium shot, wide shot. Vary it.
+- Say HOW MANY. "one single brown monkey, alone" -- not "the monkey".
+  A prompt that does not say one has produced two.
+- Re-describe each recurring character in full every time: nothing
+  remembers scene 2 while drawing scene 9, so the monkey stays the same
+  monkey only if every prompt says what he looks like.
+- Never put a camera inside an object. "cutaway view inside the pot"
+  produced an animal inside the pot.
+- End every IMAGE line with: storybook illustration
+- No words, letters or signs in the picture.
+
+Output only the script. No explanation, no code fences.
+"""
+
+
+def story_prompt(m: Manifest, profile=None) -> str:
+    """Ask for one story, by name."""
+    source = getattr(profile, "STORY_SOURCE", "") if profile else ""
+    whose = f" from the {source}" if source else ""
+    return (f"{STORY_CONTRACT}\n\n"
+            f"Write the well-known story{whose} called: {m.title}\n\n"
+            "Tell the traditional story faithfully. Do not invent a new "
+            "plot, and do not copy any modern translation word for word "
+            "-- tell it in your own plain words.\n")
+
+
+def _from_story(m: Manifest, profile) -> str:
+    """A fable, written to order by whichever model is configured.
+
+    The template engine knows two chart recipes and nothing else, which
+    is why a scheduled draft produced a script about trading costs on a
+    channel that tells fables. This asks for the thing the channel
+    actually makes.
+    """
+    if not (m.title or "").strip():
+        raise ConfigError(
+            "the story engine writes a story by name, and this episode "
+            "has no title. Create it with --title \"The Thirsty Crow\"."
+        )
+    import os
+    if os.getenv("GEMINI_API_KEY"):
+        return _ask_gemini(story_prompt(m, profile))
+    if os.getenv("OLLAMA_HOST"):
+        return _ask_ollama(story_prompt(m, profile))
+    raise ConfigError(
+        "the story engine needs a model: set GEMINI_API_KEY (free tier "
+        "is enough) or run ollama and set OLLAMA_HOST."
+    )
+
+
 def _from_file(ep: Episode) -> str:
     """The script you wrote, taken as it is.
 
@@ -264,6 +365,59 @@ DATA (the only facts you may use; never invent a number):
 
 Write the script now. Output only the scene-tagged script, nothing else.
 """
+
+
+def _ask_gemini(prompt: str) -> str:
+    """Send a prompt to Gemini and return the text.
+
+    Split out so the story engine and the data-shaped engines share one
+    transport rather than one growing two copies of it.
+    """
+    import os
+    key = os.getenv("GEMINI_API_KEY")
+    if not key:
+        raise ConfigError("GEMINI_API_KEY is not set")
+    try:
+        import google.generativeai as genai
+    except ImportError as exc:
+        raise ConfigError(
+            "google-generativeai is not installed. "
+            "pip install google-generativeai"
+        ) from exc
+    genai.configure(api_key=key)
+    model = genai.GenerativeModel(os.getenv("GEMINI_MODEL",
+                                            "gemini-2.0-flash"))
+    resp = model.generate_content(prompt)
+    text = getattr(resp, "text", None)
+    if not text:
+        raise StageError("Gemini returned an empty response")
+    # A model asked for a script sometimes wraps it in a fence anyway.
+    return text.strip().removeprefix("```markdown").removeprefix(
+        "```").removesuffix("```").strip()
+
+
+def _ask_ollama(prompt: str) -> str:
+    """The same, against a local model."""
+    import json as _json
+    import os
+    import urllib.request
+    host = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+    payload = _json.dumps({
+        "model": os.getenv("OLLAMA_MODEL", "llama3.1"),
+        "prompt": prompt, "stream": False,
+    }).encode()
+    request = urllib.request.Request(
+        f"{host}/api/generate", data=payload,
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=600) as resp:
+            text = _json.loads(resp.read()).get("response", "")
+    except Exception as exc:
+        raise StageError(f"could not reach ollama at {host}: {exc}") from exc
+    if not text.strip():
+        raise StageError("ollama returned an empty response")
+    return text.strip().removeprefix("```markdown").removeprefix(
+        "```").removesuffix("```").strip()
 
 
 def _from_gemini(m: Manifest, data: dict, profile) -> str:

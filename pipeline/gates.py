@@ -35,21 +35,47 @@ def _unattended() -> str | None:
     return event if event in UNATTENDED_EVENTS else None
 
 
-def assert_a_human_is_asking() -> None:
+def standing_approval(gate: int) -> bool:
+    """Whether the operator has told this gate to clear itself.
+
+    Off by default, and deliberately two separate settings. The channel
+    owner asked for a channel that posts without him, which means
+    something other than him has to decide -- so this exists. It is a
+    standing instruction, not an absent one: he set it, it is recorded
+    on every episode it clears, and turning it off stops it at once.
+
+    Gate 1 and Gate 2 are separate because they are different risks. A
+    bad script costs render time. A bad video costs the channel's
+    reputation, and it is the one worth leaving on longest.
+    """
+    name = f"AUTO_APPROVE_GATE_{gate}"
+    return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def assert_a_human_is_asking(gate: int | None = None) -> None:
     """Refuse to clear a gate on behalf of a timer.
 
     A human running `--approve-script` in a terminal, in the dashboard, or
     by pressing "Run workflow" has decided something. A cron firing at
-    02:00 has not, and must not be able to reach this even if a workflow
-    file is edited to try.
+    02:00 has not -- unless the operator has left standing approval for
+    that gate, which is a decision he made once rather than one nobody
+    made at all.
     """
     event = _unattended()
-    if event:
-        raise GateError(
-            f"refusing to clear a gate during a {event!r} run: a gate is a "
-            "human decision. Trigger the workflow manually instead "
-            "(workflow_dispatch), which records that you asked."
+    if not event:
+        return
+    if gate is not None and standing_approval(gate):
+        get(None, "gate").warning(
+            f"gate {gate} cleared by standing approval during a {event!r} "
+            f"run (AUTO_APPROVE_GATE_{gate} is on)"
         )
+        return
+    raise GateError(
+        f"refusing to clear a gate during a {event!r} run: a gate is a "
+        "human decision. Trigger the workflow manually instead "
+        "(workflow_dispatch), which records that you asked -- or set "
+        f"AUTO_APPROVE_GATE_{gate or 1} to leave standing approval."
+    )
 
 
 def gate_1_blockers(ep: Episode, m: Manifest) -> list[str]:
@@ -124,22 +150,28 @@ def gate_2_blockers(m: Manifest) -> list[str]:
 
 def approve_gate_1(ep: Episode, m: Manifest) -> None:
     """Clear Gate 1, or raise with the first reason it cannot be cleared."""
-    assert_a_human_is_asking()
+    assert_a_human_is_asking(1)
     blockers = gate_1_blockers(ep, m)
     if blockers:
         raise GateError("; ".join(blockers))
     m.pass_gate_1()
+    # Recorded on the episode, so "who approved this" is answerable
+    # later from the manifest alone.
+    if _unattended():
+        m.stage("script").data["gate_1_auto"] = True
     ep.save_manifest(m)
     get(m.id, "gate").info("gate 1 cleared")
 
 
 def approve_gate_2(ep: Episode, m: Manifest) -> None:
     """Clear Gate 2, or raise with the first reason it cannot be cleared."""
-    assert_a_human_is_asking()
+    assert_a_human_is_asking(2)
     blockers = gate_2_blockers(m)
     if blockers:
         raise GateError("; ".join(blockers))
     m.pass_gate_2()
+    if _unattended():
+        m.stage("assemble").data["gate_2_auto"] = True
     if m.publish_mode == "at_slot" and not m.publish_after:
         from .schedule import next_slot
         m.publish_after = next_slot().isoformat()

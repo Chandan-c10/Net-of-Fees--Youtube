@@ -869,6 +869,14 @@ SETTING_GROUPS = (
                    "its API audit, every upload is forced private "
                    "whatever this says.",
      ("YOUTUBE_PRIVACY",)),
+    ("Running without you", "Standing approval for the gates, used by "
+                            "the autopilot. Off means it still writes "
+                            "and renders every morning and then stops, "
+                            "with the video waiting for you. Gate 1 is "
+                            "the safer one to leave on: a bad script "
+                            "costs render time, a bad video costs the "
+                            "channel.",
+     ("AUTO_APPROVE_GATE_1", "AUTO_APPROVE_GATE_2")),
     ("Content", "Defaults for new episodes and the trend scan.",
      ("PROFILE", "SCRIPT_ENGINE", "GEMINI_API_KEY", "YOUTUBE_API_KEY",
       "TREND_REGION")),

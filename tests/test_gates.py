@@ -209,3 +209,43 @@ def test_a_chart_profile_is_not_asked_for_image_lines(episode, manifest):
     manifest.mark_done("scrub", findings=0)
     blockers = gates.gate_1_blockers(episode, manifest)
     assert not any("IMAGE" in b for b in blockers)
+
+
+# ---- standing approval ------------------------------------------------
+
+
+def test_a_timer_cannot_clear_a_gate_by_default(monkeypatch):
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "schedule")
+    for gate in (1, 2):
+        monkeypatch.delenv(f"AUTO_APPROVE_GATE_{gate}", raising=False)
+        with pytest.raises(GateError, match="human decision"):
+            gates.assert_a_human_is_asking(gate)
+
+
+def test_standing_approval_lets_a_timer_clear_that_gate(monkeypatch):
+    """The owner asked for a channel that posts without him, which means
+    something other than him has to decide. He set it; it is recorded."""
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "schedule")
+    monkeypatch.setenv("AUTO_APPROVE_GATE_1", "1")
+    monkeypatch.delenv("AUTO_APPROVE_GATE_2", raising=False)
+    gates.assert_a_human_is_asking(1)                 # allowed
+    with pytest.raises(GateError):                    # still refused
+        gates.assert_a_human_is_asking(2)
+
+
+def test_the_two_gates_are_separate_settings(monkeypatch):
+    """A bad script costs render time. A bad video costs the channel's
+    reputation."""
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "schedule")
+    monkeypatch.delenv("AUTO_APPROVE_GATE_1", raising=False)
+    monkeypatch.setenv("AUTO_APPROVE_GATE_2", "true")
+    with pytest.raises(GateError):
+        gates.assert_a_human_is_asking(1)
+    gates.assert_a_human_is_asking(2)
+
+
+def test_a_person_is_never_blocked(monkeypatch):
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+    gates.assert_a_human_is_asking(1)
+    gates.assert_a_human_is_asking(2)
+    gates.assert_a_human_is_asking()
