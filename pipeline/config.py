@@ -17,6 +17,29 @@ EPISODES_DIR = ROOT / "episodes"
 PROFILES_DIR = ROOT / "profiles"
 VOICES_DIR = ROOT / "voices"
 
+
+def env_int(name: str, default: int) -> int:
+    """An integer setting, or the default if it is missing or malformed.
+
+    Settings arrive from a shell, a `.env` file and a CI runner, and any
+    of the three can hand over something that is not a number. A bad
+    value should fall back to the default, not crash the process that
+    was reading it.
+    """
+    try:
+        return int(str(os.getenv(name, default)).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def env_float(name: str, default: float) -> float:
+    """A fractional setting, or the default if it is missing or malformed."""
+    try:
+        return float(str(os.getenv(name, default)).strip())
+    except (TypeError, ValueError):
+        return default
+
+
 # All timestamps are stored UTC. Slot times are expressed in this zone and
 # converted on write -- architecture doc, section 24.
 CHANNEL_TZ = ZoneInfo(os.getenv("CHANNEL_TZ", "Asia/Kolkata"))
@@ -57,12 +80,12 @@ EVENING_SLOT = PUBLISH_SLOTS[-1]
 # How many episodes a batch produces in one go. Drafting several at once
 # and releasing them on the slots is the point of the queue: the work
 # happens when you have time, the posting happens on schedule.
-BATCH_SIZE = int(os.getenv("BATCH_SIZE", "10"))
+BATCH_SIZE = env_int("BATCH_SIZE", 10)
 
 # Refuse to queue more than this far ahead. A queue longer than a
 # fortnight is one whose early episodes were written about a different
 # week.
-MAX_QUEUE_DAYS = int(os.getenv("MAX_QUEUE_DAYS", "14"))
+MAX_QUEUE_DAYS = env_int("MAX_QUEUE_DAYS", 14)
 
 
 @dataclass(frozen=True)

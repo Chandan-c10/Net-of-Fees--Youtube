@@ -7,11 +7,15 @@ name: draft
 # This workflow deliberately stops at Gate 1. It prepares a script and
 # tells you it is waiting; it cannot approve or publish, because there is
 # no flag that skips a gate -- architecture doc, section 13.
+#
+# NO LONGER SCHEDULED. `autopilot.yml` is the daily run: it takes a title
+# from the queue and carries it all the way to YouTube, where this one
+# only ever drafted and waited. Two schedules meant two unrelated things
+# were made every day -- which is why "the scheduled draft" kept
+# producing an engineering episode when a fable was expected. Kept for
+# running by hand, for the profiles the queue does not cover.
 
 on:
-  schedule:
-    - cron: "0 2 * * *"   # 07:30 IST, ahead of the morning slot
-    - cron: "0 13 * * *"  # 18:30 IST, ahead of the evening slot
   workflow_dispatch:
     inputs:
       profile:
@@ -21,7 +25,7 @@ on:
       recipe:
         description: "Recipe to draft from"
         required: false
-        default: incident_log
+        default: story
 
 jobs:
   draft:
@@ -97,7 +101,7 @@ jobs:
         run: |
           python run.py new --id "$ID" \
             --profile "$PROFILE" \
-            --recipe "${{ inputs.recipe || 'incident_log' }}"
+            --recipe "${{ inputs.recipe || 'story' }}"
           python run.py "$ID" --stage script
           python run.py "$ID" --stage scrub
           python run.py "$ID" --status

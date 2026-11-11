@@ -29,6 +29,7 @@ class IncidentLogRecipe:
     name: str = "incident_log"
     tier: str = "A"
     title_template: str = "8 bugs. My tests caught one."
+    needs_local_data: bool = True
     scenarios: list = field(default_factory=list)
 
     def export(self, **params: object) -> dict:

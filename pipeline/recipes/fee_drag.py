@@ -152,6 +152,7 @@ class FeeDragRecipe:
     name: str = "fee_drag"
     tier: str = "A"
     title_template: str = "What one F&O trade really costs"
+    needs_local_data: bool = False
     scenarios: list[dict] = field(default_factory=list)
 
     def export(self, **params: object) -> dict:

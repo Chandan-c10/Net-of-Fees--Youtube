@@ -127,7 +127,7 @@ jobs:
         run: |
           python run.py new --id "$ID" --title "$TITLE" \
             --profile "${{ inputs.profile || 'storyboard_shorts' }}" \
-            --recipe incident_log --force
+            --recipe story --force
           python run.py "$ID" --stage script --script-engine story --force
           python run.py "$ID" --stage scrub
           head -40 "episodes/$ID/script.md"

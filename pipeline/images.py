@@ -40,6 +40,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from . import image_library
+from .config import env_int
 from .errors import ConfigError, StageError
 from .logging_setup import get
 
@@ -513,7 +514,7 @@ def from_local(prompt: str, width: int, height: int, seed: int,
     payload = json.dumps({
         "prompt": prompt, "negative_prompt": NEGATIVE,
         "width": width, "height": height, "seed": seed,
-        "steps": int(os.getenv("IMAGE_LOCAL_STEPS", "28")),
+        "steps": env_int("IMAGE_LOCAL_STEPS", 28),
         "sampler_name": os.getenv("IMAGE_LOCAL_SAMPLER", "DPM++ 2M"),
     }).encode()
     body, _kind = (open_url or _open)(
@@ -563,7 +564,7 @@ def from_cloudflare(prompt: str, width: int, height: int, seed: int,
     # stable across runs; this is where that stops being a nicety.
     payload = json.dumps({
         "prompt": prompt,
-        "steps": int(os.getenv("CLOUDFLARE_IMAGE_STEPS", "4")),
+        "steps": env_int("CLOUDFLARE_IMAGE_STEPS", 4),
     }).encode()
     body, _kind = _open_patiently(
         open_url, url, payload,

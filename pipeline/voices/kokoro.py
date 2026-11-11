@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from ..config import env_float
 from ..errors import ConfigError, StageError
 from .base import VoiceResult, measure_wav
 
@@ -161,8 +162,9 @@ class KokoroVoice:
         """
         if self._explicit_speed is not None:
             return self._explicit_speed
-        return float(os.getenv("VOICE_SPEED_CONTINUOUS",
-                               os.getenv("VOICE_SPEED", CONTINUOUS_SPEED)))
+        if os.getenv("VOICE_SPEED_CONTINUOUS"):
+            return env_float("VOICE_SPEED_CONTINUOUS", CONTINUOUS_SPEED)
+        return env_float("VOICE_SPEED", CONTINUOUS_SPEED)
 
     def render_text(self, text: str, speed: float | None = None):
         """Raw samples for any text, at this voice's speed.

@@ -95,7 +95,7 @@ jobs:
           # drift apart.
           TITLE=$(head -1 "stories/$ID.md" | sed 's/^# *//')
           python run.py new --id "$ID" --title "$TITLE" \
-            --profile "${{ inputs.profile }}" --recipe incident_log --force
+            --profile "${{ inputs.profile }}" --recipe story --force
           mkdir -p "episodes/$ID"
           cp "stories/$ID.md" "episodes/$ID/script.md"
 

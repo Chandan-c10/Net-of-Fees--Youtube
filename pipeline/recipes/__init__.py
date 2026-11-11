@@ -16,6 +16,10 @@ class Recipe(Protocol):
     name: str
     tier: str
     title_template: str
+    # True when export() reads a file that is not in git. Such a recipe
+    # cannot be the default for an unattended run: a CI runner checks out
+    # the repository and nothing else, so the file is simply not there.
+    needs_local_data: bool
 
     def export(self, **params: object) -> dict: ...
 

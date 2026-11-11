@@ -21,6 +21,7 @@ import smtplib
 from email.message import EmailMessage
 
 from . import health, scrub
+from .config import env_int
 from .logging_setup import get
 
 TIMEOUT_SEC = 20
@@ -34,7 +35,10 @@ class Channel:
 
     def __init__(self) -> None:
         self.host = os.getenv("SMTP_HOST")
-        self.port = int(os.getenv("SMTP_PORT", "587"))
+        # Never int() straight off the environment here: this object is
+        # built to report a failure, so raising while it is assembled
+        # replaces the real error with a useless one.
+        self.port = env_int("SMTP_PORT", 587)
         self.user = os.getenv("SMTP_USER")
         self.password = os.getenv("SMTP_APP_PASSWORD")
         self.to = os.getenv("ALERT_EMAIL")
