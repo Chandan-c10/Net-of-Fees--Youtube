@@ -24,6 +24,12 @@ name: autopilot
 on:
   schedule:
     - cron: "40 9 * * *"   # 15:10 IST
+    # TEMPORARY, for today only: a second slot to watch the whole chain
+    # run on the `schedule` event, which is the one the gates treat as
+    # unattended. A manual run proves less, because pressing the button
+    # is itself the human decision a gate asks for. Remove once a
+    # scheduled run has published.
+    - cron: "50 11 * * *"  # 17:20 IST
   workflow_dispatch:
     inputs:
       title:
