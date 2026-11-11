@@ -46,17 +46,17 @@ jobs:
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      R2_STORAGE_CAP_GB: ${{ vars.R2_STORAGE_CAP_GB }}
-      R2_RETAIN_DAYS: ${{ vars.R2_RETAIN_DAYS }}
-      IMAGE_PROVIDERS: ${{ vars.IMAGE_PROVIDERS }}
+      R2_STORAGE_CAP_GB: ${{ vars.R2_STORAGE_CAP_GB || secrets.R2_STORAGE_CAP_GB }}
+      R2_RETAIN_DAYS: ${{ vars.R2_RETAIN_DAYS || secrets.R2_RETAIN_DAYS }}
+      IMAGE_PROVIDERS: ${{ vars.IMAGE_PROVIDERS || secrets.IMAGE_PROVIDERS }}
       CLOUDFLARE_AI_TOKEN: ${{ secrets.CLOUDFLARE_AI_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
       TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
-      IMAGE_WORKERS: ${{ vars.IMAGE_WORKERS }}
-      IMAGE_MAX_NEW: ${{ vars.IMAGE_MAX_NEW }}
-      IMAGE_PACE_SEC: ${{ vars.IMAGE_PACE_SEC }}
-      IMAGE_STYLE: ${{ vars.IMAGE_STYLE }}
+      IMAGE_WORKERS: ${{ vars.IMAGE_WORKERS || secrets.IMAGE_WORKERS }}
+      IMAGE_MAX_NEW: ${{ vars.IMAGE_MAX_NEW || secrets.IMAGE_MAX_NEW }}
+      IMAGE_PACE_SEC: ${{ vars.IMAGE_PACE_SEC || secrets.IMAGE_PACE_SEC }}
+      IMAGE_STYLE: ${{ vars.IMAGE_STYLE || secrets.IMAGE_STYLE }}
       # A runner has no voice reference on disk; this is where it gets
       # one. The key reads it from the private bucket, so no link exists
       # that could clone the speaker if it leaked.

@@ -50,16 +50,16 @@ jobs:
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      R2_STORAGE_CAP_GB: ${{ vars.R2_STORAGE_CAP_GB }}
-      R2_RETAIN_DAYS: ${{ vars.R2_RETAIN_DAYS }}
+      R2_STORAGE_CAP_GB: ${{ vars.R2_STORAGE_CAP_GB || secrets.R2_STORAGE_CAP_GB }}
+      R2_RETAIN_DAYS: ${{ vars.R2_RETAIN_DAYS || secrets.R2_RETAIN_DAYS }}
       CLOUDFLARE_AI_TOKEN: ${{ secrets.CLOUDFLARE_AI_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
-      IMAGE_PROVIDERS: ${{ vars.IMAGE_PROVIDERS }}
-      IMAGE_MAX_NEW: ${{ vars.IMAGE_MAX_NEW }}
-      IMAGE_PACE_SEC: ${{ vars.IMAGE_PACE_SEC }}
-      IMAGE_WORKERS: ${{ vars.IMAGE_WORKERS }}
-      IMAGE_STYLE: ${{ vars.IMAGE_STYLE }}
+      IMAGE_PROVIDERS: ${{ vars.IMAGE_PROVIDERS || secrets.IMAGE_PROVIDERS }}
+      IMAGE_MAX_NEW: ${{ vars.IMAGE_MAX_NEW || secrets.IMAGE_MAX_NEW }}
+      IMAGE_PACE_SEC: ${{ vars.IMAGE_PACE_SEC || secrets.IMAGE_PACE_SEC }}
+      IMAGE_WORKERS: ${{ vars.IMAGE_WORKERS || secrets.IMAGE_WORKERS }}
+      IMAGE_STYLE: ${{ vars.IMAGE_STYLE || secrets.IMAGE_STYLE }}
       VOICE_REFERENCE_KEY: ${{ secrets.VOICE_REFERENCE_KEY }}
 
     steps:

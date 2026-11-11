@@ -111,3 +111,37 @@ def test_a_workflow_defaults_to_a_recipe_a_fresh_clone_can_run():
             f"not in git. A runner checks out the repository and nothing "
             f"else, so that run fails before it writes a word."
         )
+
+
+# ---- a setting put in the other list must still work -----------------
+#
+# The gates were created as repository *secrets* while the workflows read
+# `vars.*`. Nothing failed: the runner simply received an empty string,
+# the gate stayed shut, and no video was published for a reason nobody
+# could see from the log.
+
+
+def test_every_variable_falls_back_to_a_secret():
+    bare = re.compile(r"\$\{\{\s*vars\.([A-Z0-9_]+)\s*\}\}")
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        for match in bare.finditer(path.read_text(encoding="utf-8")):
+            raise AssertionError(
+                f"{path.name} reads vars.{match.group(1)} with no fallback. "
+                f"Write `${{{{ vars.X || secrets.X }}}}`, so the setting "
+                f"works from whichever list it was put in."
+            )
+
+
+def test_no_step_condition_reads_secrets():
+    """GitHub does not give a step `if` the `secrets` context.
+
+    Such a condition is not an error -- it is silently false forever,
+    which for the publish step means a channel that never posts.
+    """
+    pattern = re.compile(r"^\s*if:.*secrets\.", re.MULTILINE)
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        found = pattern.findall(path.read_text(encoding="utf-8"))
+        assert not found, (
+            f"{path.name}: a step `if` cannot see `secrets`; it would be "
+            f"false forever. Read the job's `env` instead: {found}"
+        )

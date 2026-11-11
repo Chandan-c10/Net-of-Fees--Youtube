@@ -9,10 +9,17 @@ name: autopilot
 # nothing.
 #
 # IT CAN ONLY PUBLISH IF YOU LET IT. AUTO_APPROVE_GATE_1 and
-# AUTO_APPROVE_GATE_2 are off unless set as repository variables. With
-# neither set this workflow still writes and renders the story and then
-# stops, which is a useful thing on its own: the video is waiting for
-# you instead of the blank page.
+# AUTO_APPROVE_GATE_2 are off unless set. With neither set this workflow
+# still writes and renders the story and then stops, which is a useful
+# thing on its own: the video is waiting for you instead of the blank
+# page.
+#
+# Every setting below is read from a repository variable or, failing
+# that, a secret of the same name, because "I put it in the other list"
+# must not mean "nothing happened and nothing said why". Prefer a
+# variable: a secret's value is redacted from the logs, so a gate set
+# as a secret with the value `true` blanks the word `true` out of every
+# line this workflow prints.
 
 on:
   schedule:
@@ -33,10 +40,10 @@ jobs:
     env:
       VOICE_ENGINE: kokoro
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
-      AUTO_APPROVE_GATE_1: ${{ vars.AUTO_APPROVE_GATE_1 }}
-      AUTO_APPROVE_GATE_2: ${{ vars.AUTO_APPROVE_GATE_2 }}
-      YOUTUBE_PRIVACY: ${{ vars.YOUTUBE_PRIVACY }}
+      GEMINI_MODEL: ${{ vars.GEMINI_MODEL || secrets.GEMINI_MODEL }}
+      AUTO_APPROVE_GATE_1: ${{ vars.AUTO_APPROVE_GATE_1 || secrets.AUTO_APPROVE_GATE_1 }}
+      AUTO_APPROVE_GATE_2: ${{ vars.AUTO_APPROVE_GATE_2 || secrets.AUTO_APPROVE_GATE_2 }}
+      YOUTUBE_PRIVACY: ${{ vars.YOUTUBE_PRIVACY || secrets.YOUTUBE_PRIVACY }}
       SMTP_HOST: ${{ secrets.SMTP_HOST }}
       SMTP_PORT: ${{ secrets.SMTP_PORT }}
       SMTP_USER: ${{ secrets.SMTP_USER }}
@@ -46,15 +53,15 @@ jobs:
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      R2_STORAGE_CAP_GB: ${{ vars.R2_STORAGE_CAP_GB }}
-      R2_RETAIN_DAYS: ${{ vars.R2_RETAIN_DAYS }}
+      R2_STORAGE_CAP_GB: ${{ vars.R2_STORAGE_CAP_GB || secrets.R2_STORAGE_CAP_GB }}
+      R2_RETAIN_DAYS: ${{ vars.R2_RETAIN_DAYS || secrets.R2_RETAIN_DAYS }}
       CLOUDFLARE_AI_TOKEN: ${{ secrets.CLOUDFLARE_AI_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
-      IMAGE_PROVIDERS: ${{ vars.IMAGE_PROVIDERS }}
-      IMAGE_MAX_NEW: ${{ vars.IMAGE_MAX_NEW }}
-      IMAGE_STYLE: ${{ vars.IMAGE_STYLE }}
-      IMAGE_WORKERS: ${{ vars.IMAGE_WORKERS }}
+      IMAGE_PROVIDERS: ${{ vars.IMAGE_PROVIDERS || secrets.IMAGE_PROVIDERS }}
+      IMAGE_MAX_NEW: ${{ vars.IMAGE_MAX_NEW || secrets.IMAGE_MAX_NEW }}
+      IMAGE_STYLE: ${{ vars.IMAGE_STYLE || secrets.IMAGE_STYLE }}
+      IMAGE_WORKERS: ${{ vars.IMAGE_WORKERS || secrets.IMAGE_WORKERS }}
       YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
 
     steps:
@@ -146,7 +153,9 @@ jobs:
           python run.py "$ID" --status
 
       - name: Publish it
-        if: vars.AUTO_APPROVE_GATE_2 == 'true' || vars.AUTO_APPROVE_GATE_2 == '1'
+        # `env`, not `vars`: a step `if` cannot see `secrets`, and the
+        # job env above accepts the setting from either place.
+        if: env.AUTO_APPROVE_GATE_2 == 'true' || env.AUTO_APPROVE_GATE_2 == '1'
         env:
           ID: ${{ steps.pick.outputs.id }}
         run: |
