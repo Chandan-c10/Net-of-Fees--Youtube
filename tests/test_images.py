@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import threading
 from functools import lru_cache
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -1131,3 +1132,34 @@ def test_borrowed_pictures_are_not_all_the_same_one(
         f"{len(story.scenes)} scenes borrowed only {len(digests)} distinct "
         f"picture(s); the library had four to choose from"
     )
+
+
+def test_redraw_runs_a_stage_that_is_already_done(episode, story, monkeypatch):
+    """`--redraw 3,14` on a finished episode must actually draw.
+
+    It moved the two pictures aside, skipped the stage because images
+    was marked done, and then put them back -- reporting success and
+    changing nothing. Every redraw of a finished episode was a no-op,
+    which is every redraw anybody would want.
+    """
+    import argparse
+
+    import run as cli
+
+    story.mark_done("images", made=[], kept=[])
+    ran = []
+    monkeypatch.setattr(cli, "_run_stage",
+                        lambda name, *a, **k: ran.append(name))
+    monkeypatch.setattr(story, "gate_blocking", lambda name: None)
+    monkeypatch.setattr(story, "unmet_prerequisites", lambda name: [])
+
+    log = logging.getLogger("test-redraw")
+    plain = argparse.Namespace(force=False, redraw=None, refetch_images=False,
+                               no_retry=True)
+    cli._execute(episode, story, "images", None, plain, log)
+    assert ran == [], "a done stage should be skipped when nothing asks for it"
+
+    asked = argparse.Namespace(force=False, redraw="3", refetch_images=False,
+                               no_retry=True)
+    cli._execute(episode, story, "images", None, asked, log)
+    assert ran == ["images"], "--redraw did not run the stage"

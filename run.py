@@ -176,7 +176,14 @@ def _execute(ep: Episode, m: Manifest, name: str, settings, args, log) -> bool:
             f"cannot run {name!r}: these stages are not done: {unmet}"
         )
 
-    if m.is_done(name) and not args.force:
+    # Asking for specific scenes to be drawn again is itself the reason
+    # to run a stage that is already done. Without this, `--redraw 3,14`
+    # moved two pictures aside, skipped the stage, and put them back --
+    # a flag that reported success and changed nothing.
+    asked_again = bool(getattr(args, "redraw", None)
+                       or getattr(args, "refetch_images", False))
+    if m.is_done(name) and not args.force and not (
+            name == "images" and asked_again):
         log.debug(f"{name}: already done, skipping")
         return True
 
