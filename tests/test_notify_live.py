@@ -106,7 +106,9 @@ def test_a_real_message_crosses_the_wire(relay):
     notify.Channel().send("subject line", "body line")
     relay.join(timeout=5)
 
-    assert "Subject: subject line" in relay.message
+    # Shaped in send(), so this is also where the shaping is proved to
+    # reach the wire rather than only the helper that builds it.
+    assert 'Subject: Net-of-Fees "subject line"' in relay.message
     assert "body line" in relay.message
     assert "To: ops@example.com" in relay.message
     assert any("ops@example.com" in line for line in relay.envelope)

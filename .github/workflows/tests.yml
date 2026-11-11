@@ -46,9 +46,26 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
+      # A step does not inherit PATH changes an earlier step's installer
+      # made, so the shim directory is named outright and checked here.
+      # Left to chance, a missing FFmpeg surfaced three steps later as
+      # `doctor` exiting 1, which reads like a code failure and is not.
       - name: Install FFmpeg (Windows)
         if: runner.os == 'Windows'
-        run: choco install ffmpeg --no-progress -y
+        shell: pwsh
+        run: |
+          choco install ffmpeg --no-progress -y
+          $shim = "C:\ProgramData\chocolatey\bin"
+          if (-not (Test-Path "$shim\ffmpeg.exe")) {
+            $exe = Get-ChildItem "C:\ProgramData\chocolatey\lib" `
+                     -Filter ffmpeg.exe -Recurse -ErrorAction SilentlyContinue |
+                   Select-Object -First 1
+            if (-not $exe) { throw "ffmpeg did not install" }
+            $shim = $exe.DirectoryName
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value $shim
+          & "$shim\ffmpeg.exe" -version | Select-Object -First 1
+          & "$shim\ffprobe.exe" -version | Select-Object -First 1
 
       - name: Install
         run: |

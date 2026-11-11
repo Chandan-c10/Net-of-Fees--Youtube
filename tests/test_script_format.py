@@ -234,3 +234,70 @@ def test_neither_place_having_a_script_names_both(tmp_path, monkeypatch):
     ep.ensure_dirs()
     with _pytest.raises(ConfigError, match="stories"):
         script_gen._from_file(ep)
+
+
+# ---- the closing line on every video ----------------------------------
+
+
+def _scene(index, text, image="a jackal beside a drum"):
+    from pipeline.manifest import Scene
+
+    return Scene(index=index, text=text, visual_spec={}, image_prompt=image,
+                 voice="chandan_en")
+
+
+def test_every_script_ends_with_the_subscribe_line(monkeypatch):
+    from pipeline.stages.script_gen import add_outro, outro_line
+
+    monkeypatch.delenv("OUTRO_LINE", raising=False)
+    scenes = [_scene(1, "Once upon a time."),
+              _scene(2, "The moral of the story. Be kind.")]
+    assert add_outro(scenes) is True
+    assert scenes[-1].text == outro_line()
+    assert scenes[-1].index == 3
+
+
+def test_the_closing_line_carries_the_last_picture(monkeypatch):
+    """No extra drawing: the closing shot is the one the story ended on.
+
+    A generator that is out of quota must not be asked for one more
+    picture just to say "subscribe".
+    """
+    from pipeline.stages.script_gen import add_outro
+
+    monkeypatch.delenv("OUTRO_LINE", raising=False)
+    scenes = [_scene(1, "The moral of the story.", image="a bear in a forest")]
+    add_outro(scenes)
+    assert scenes[-1].image_prompt == "a bear in a forest"
+
+
+def test_running_the_script_stage_twice_adds_one_closing_line(monkeypatch):
+    from pipeline.stages.script_gen import add_outro
+
+    monkeypatch.delenv("OUTRO_LINE", raising=False)
+    scenes = [_scene(1, "Once upon a time.")]
+    add_outro(scenes)
+    add_outro(scenes)
+    add_outro(scenes)
+    assert len(scenes) == 2, "the subscribe line stacked up"
+
+
+def test_the_closing_line_can_be_changed_or_turned_off(monkeypatch):
+    from pipeline.stages.script_gen import add_outro
+
+    monkeypatch.setenv("OUTRO_LINE", "Follow for a story every day.")
+    scenes = [_scene(1, "Once upon a time.")]
+    add_outro(scenes)
+    assert scenes[-1].text == "Follow for a story every day."
+
+    monkeypatch.setenv("OUTRO_LINE", "")
+    bare = [_scene(1, "Once upon a time.")]
+    assert add_outro(bare) is False
+    assert len(bare) == 1
+
+
+def test_nothing_is_appended_to_an_empty_script(monkeypatch):
+    from pipeline.stages.script_gen import add_outro
+
+    monkeypatch.delenv("OUTRO_LINE", raising=False)
+    assert add_outro([]) is False

@@ -11,11 +11,12 @@ breakdown is formulaic and a deterministic script is testable.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from ..errors import ConfigError, StageError
 from ..logging_setup import get
-from ..manifest import Episode, Manifest
+from ..manifest import Episode, Manifest, Scene
 from ..script_format import parse, render, to_scenes, validate_against_snapshot
 from .export import load_snapshot
 
@@ -53,12 +54,51 @@ def run(ep: Episode, m: Manifest, engine: str = "template", profile=None) -> Non
     scenes = to_scenes(parsed, default_voice=m.voice)
     validate_against_snapshot(scenes, data, profile)
     _check_hook(scenes, profile)
+    add_outro(scenes, m.voice)
 
     m.scenes = scenes
     ep.script.write_text(render(scenes, m.title), encoding="utf-8")
     m.mark_done("script", engine=engine, scenes=len(scenes),
                 words=sum(len(s.text.split()) for s in scenes))
     log.info(f"{len(scenes)} scenes, {sum(len(s.text.split()) for s in scenes)} words")
+
+
+# The last thing a viewer hears. Asked for on every video, so it is
+# added here rather than written into each script: a line a generator
+# has to remember is a line that will be missing from one in ten.
+DEFAULT_OUTRO = "If you enjoyed this story, subscribe for more."
+
+
+def outro_line() -> str:
+    """The closing line, or empty to leave videos ending on the story."""
+    raw = os.getenv("OUTRO_LINE")
+    return DEFAULT_OUTRO if raw is None else raw.strip()
+
+
+def add_outro(scenes: list, default_voice: str | None = None) -> bool:
+    """Append the closing line as a scene of its own. True if added.
+
+    It carries the previous scene's picture prompt rather than one of
+    its own, so the closing shot is the one the story ended on and no
+    extra drawing is asked of a generator that is often out of quota.
+
+    Idempotent: re-running the script stage must not stack three
+    subscribe lines on the end of an episode.
+    """
+    line = outro_line()
+    if not line or not scenes:
+        return False
+    if scenes[-1].text.strip() == line:
+        return False
+    last = scenes[-1]
+    scenes.append(Scene(
+        index=last.index + 1,
+        text=line,
+        visual_spec=dict(getattr(last, "visual_spec", {}) or {}),
+        image_prompt=getattr(last, "image_prompt", "") or "",
+        voice=getattr(last, "voice", None) or default_voice,
+    ))
+    return True
 
 
 def _check_hook(scenes, profile=None) -> None:
