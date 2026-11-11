@@ -200,6 +200,21 @@ def wants_picture_prompts(profile) -> bool:
     return getattr(profile, "MOTION", None) == "kenburns"
 
 
+STORIES_DIR = Path(__file__).resolve().parent.parent.parent / "stories"
+
+
+def story_path(episode_id: str) -> Path:
+    """Where a committed script for this episode would live.
+
+    `episodes/` is gitignored, correctly -- it fills with video. So a
+    script written there can never be seen by a machine that is not
+    this one, and the whole pipeline stays tied to one laptop. A script
+    is a few kilobytes of text: it belongs in the repository, and from
+    there any runner can read it.
+    """
+    return STORIES_DIR / f"{episode_id}.md"
+
+
 def _from_file(ep: Episode) -> str:
     """The script you wrote, taken as it is.
 
@@ -215,10 +230,17 @@ def _from_file(ep: Episode) -> str:
     """
     path = ep.script
     if not path.exists():
+        # Then the committed one, which is what a cloud runner has.
+        shared = story_path(ep.id)
+        if shared.exists():
+            path = shared
+    if not path.exists():
         raise ConfigError(
-            f"no script at {path}. The 'file' engine reads a script you "
-            "wrote; write it there first, with a [SCENE n] header per "
-            "scene and an IMAGE: line saying what each one shows."
+            f"no script at {ep.script} or {story_path(ep.id)}. "
+            "The 'file' engine reads a script you wrote; write it in "
+            "either place, with a [SCENE n] header per scene and an "
+            "IMAGE: line saying what each one shows. stories/ is "
+            "committed, so a cloud render can see it."
         )
     text = path.read_text(encoding="utf-8").strip()
     if not text:

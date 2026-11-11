@@ -29,6 +29,43 @@ def wants_pictures(profile) -> bool:
     return getattr(profile, "MOTION", None) == "kenburns"
 
 
+def redraw(ep: Episode, m: Manifest, scenes: list[int], log=None) -> list[int]:
+    """Throw away specific scenes' pictures so they are drawn again.
+
+    A generator gets scenes wrong in ways no check can catch: two crows
+    where the prompt said one, an animal inside a pot. Fixing that by
+    hand meant knowing which file to delete, which is a thing a person
+    should not have to know. Removed from the library too -- otherwise
+    the wrong picture is the one reused next time.
+    """
+    log = log or get(m.id, "images")
+    from .. import image_library
+
+    known = {s.index for s in m.scenes}
+    unknown = sorted(set(scenes) - known)
+    if unknown:
+        raise StageError(
+            f"this episode has no scene {unknown}; it has 1 to "
+            f"{max(known) if known else 0}"
+        )
+
+    shelf = image_library.load()
+    gone = []
+    for index in sorted(set(scenes)):
+        picture = ep.dir / "sources" / f"scene_{index:02d}.png"
+        picture.unlink(missing_ok=True)
+        scene = next(s for s in m.scenes if s.index == index)
+        raw = (getattr(scene, "image_prompt", "") or "").strip()
+        for entry in shelf:
+            if raw and entry.prompt.strip() == raw:
+                entry.path.unlink(missing_ok=True)
+        gone.append(index)
+    # Re-read, so the index loses the rows whose files have just gone.
+    image_library.save(image_library.load())
+    log.info(f"cleared {len(gone)} picture(s): {gone}")
+    return gone
+
+
 def run(ep: Episode, m: Manifest, profile, spec=None,
         force: bool = False) -> dict:
     log = get(m.id, "images")

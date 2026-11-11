@@ -153,6 +153,36 @@ deletes itself on a schedule is not a backup.
 
 ---
 
+## Writing a story the cloud can render
+
+`episodes/` is gitignored, correctly: it fills with video. A script
+written only there can never be seen by a machine that is not yours,
+which ties the whole pipeline to one laptop. A script is a few
+kilobytes of text, so it belongs in the repository.
+
+```bash
+# write it, commit it, push it
+vim stories/panch05.md
+git add stories/panch05.md && git commit -m "The jackal and the drum" && git push
+```
+
+Then GitHub → Actions → **story** → Run workflow → enter `panch05`.
+
+It renders on GitHub's machines: narration, pictures, captions, the
+lot. Nothing of yours needs to be switched on. When it finishes you
+get a mail, you watch it, and you run the `publish` workflow if you are
+happy. Two gates, two decisions, neither of them automatic.
+
+The file engine looks in `episodes/<id>/script.md` first and
+`stories/<id>.md` second, so editing locally still wins over what was
+pushed.
+
+A story file is just the script format: a `# Title` heading, a
+`[SCENE n]` header per scene, an `IMAGE:` line saying what that scene
+shows, and the narration.
+
+---
+
 ## Moving to another machine
 
 Nothing here is tied to one laptop. Everything that matters is in git or

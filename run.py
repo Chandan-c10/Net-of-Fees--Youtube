@@ -102,6 +102,16 @@ def _run_stage(name: str, ep: Episode, m: Manifest, settings, args) -> None:
             m.voice = args.voice
         voice.run(ep, m, engine_name=args.voice_engine)
     elif name == "images":
+        wanted = (getattr(args, "redraw", None) or "").strip()
+        if wanted:
+            try:
+                scenes = [int(n) for n in wanted.replace(" ", "").split(",")
+                          if n]
+            except ValueError:
+                raise ConfigError(
+                    f"--redraw takes scene numbers, e.g. 3,14 (got {wanted!r})"
+                ) from None
+            images.redraw(ep, m, scenes)
         images.run(ep, m, profile,
                    force=getattr(args, "refetch_images", False))
     elif name == "charts":
@@ -893,6 +903,9 @@ def main(argv: list[str] | None = None) -> int:
         # generator those are eleven requests you may not get back.
         rp.add_argument("--refetch-images", action="store_true",
                         help="draw every scene picture again")
+        rp.add_argument("--redraw", metavar="N[,N...]",
+                        help="draw these scenes' pictures again, and "
+                             "nothing else. e.g. --redraw 3,14")
         # Only a person can answer this, because the narrow upload scope
         # cannot read the channel to find out.
         rp.add_argument("--privacy",

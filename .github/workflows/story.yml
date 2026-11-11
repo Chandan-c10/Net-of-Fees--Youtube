@@ -1,0 +1,166 @@
+name: story
+
+# Render a story you committed, on GitHub's machines.
+#
+# The other render workflow collects a draft that the scheduled run
+# produced. This one is for a script you wrote yourself: you push
+# stories/<id>.md, you run this, and nothing of yours needs to be
+# switched on. That was the last thing tying the pipeline to one
+# laptop.
+#
+# Gate 1 is cleared here, and only here: this workflow is
+# workflow_dispatch only, so pressing "Run workflow" is the approval --
+# the same deliberate act as typing it in a terminal. A schedule cannot
+# start it, and pipeline/gates.py independently refuses to clear a gate
+# during a scheduled run.
+#
+# Publishing is NOT done here. When the render is finished, watch it,
+# then run the `publish` workflow. Two gates, two decisions.
+
+on:
+  workflow_dispatch:
+    inputs:
+      story:
+        description: "Story id — the name of the file in stories/ without .md"
+        required: true
+      profile:
+        description: "Content profile"
+        required: false
+        default: storyboard_shorts
+      voice_engine:
+        description: "Voice engine"
+        required: false
+        default: kokoro
+        type: choice
+        options: [kokoro, cloned, silent]
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      ID: ${{ inputs.story }}
+      VOICE_ENGINE: ${{ inputs.voice_engine }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
+      ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_STORAGE_CAP_GB: ${{ vars.R2_STORAGE_CAP_GB }}
+      R2_RETAIN_DAYS: ${{ vars.R2_RETAIN_DAYS }}
+      CLOUDFLARE_AI_TOKEN: ${{ secrets.CLOUDFLARE_AI_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+      IMAGE_PROVIDERS: ${{ vars.IMAGE_PROVIDERS }}
+      IMAGE_MAX_NEW: ${{ vars.IMAGE_MAX_NEW }}
+      IMAGE_PACE_SEC: ${{ vars.IMAGE_PACE_SEC }}
+      IMAGE_WORKERS: ${{ vars.IMAGE_WORKERS }}
+      IMAGE_STYLE: ${{ vars.IMAGE_STYLE }}
+      VOICE_REFERENCE_KEY: ${{ secrets.VOICE_REFERENCE_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-voice.txt
+          pip install -r requirements-publish.txt
+
+      - name: Check the story exists
+        run: |
+          if [ ! -f "stories/$ID.md" ]; then
+            echo "::error::no stories/$ID.md in this repository"
+            ls stories/ || true
+            exit 1
+          fi
+          head -1 "stories/$ID.md"
+
+      - name: Create the episode
+        run: |
+          # The title is the script's own heading, so the two cannot
+          # drift apart.
+          TITLE=$(head -1 "stories/$ID.md" | sed 's/^# *//')
+          python run.py new --id "$ID" --title "$TITLE" \
+            --profile "${{ inputs.profile }}" --recipe incident_log --force
+          mkdir -p "episodes/$ID"
+          cp "stories/$ID.md" "episodes/$ID/script.md"
+
+      - name: Read the script and scan it for secrets
+        run: |
+          python run.py "$ID" --stage script --script-engine file --force
+          python run.py "$ID" --stage scrub
+
+      - name: Fetch the picture library
+        continue-on-error: true
+        run: python run.py archive --restore-library
+
+      - name: Clear Gate 1
+        run: |
+          # Only reachable on workflow_dispatch. Pressing "Run workflow"
+          # is the approval; gates.py refuses on a schedule regardless.
+          python run.py "$ID" --approve-script
+
+      - name: Render
+        run: |
+          python run.py "$ID" --voice-engine "$VOICE_ENGINE"
+          python run.py "$ID" --status
+
+      - name: Look at it the way a viewer would
+        continue-on-error: true
+        run: python run.py check "$ID"
+
+      - name: Back up the record and the pictures
+        if: always()
+        continue-on-error: true
+        run: python run.py archive --backup
+
+      - name: Keep the result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: story-${{ inputs.story }}
+          retention-days: 7
+          path: |
+            episodes/${{ inputs.story }}/manifest.json
+            episodes/${{ inputs.story }}/metadata.json
+            episodes/${{ inputs.story }}/script.md
+            episodes/${{ inputs.story }}/captions.srt
+            episodes/${{ inputs.story }}/out/video.mp4
+            episodes/${{ inputs.story }}/out/thumb_*.png
+
+      - name: Say it is ready to watch
+        if: success()
+        run: |
+          python - <<'PY'
+          import os
+          from pipeline import notify
+          ch = notify.Channel()
+          if not ch.configured:
+              print("alerts not configured; skipping")
+              raise SystemExit(0)
+          ep = os.environ["ID"]
+          run = ("https://github.com/${{ github.repository }}/actions/runs/"
+                 "${{ github.run_id }}")
+          ch.send(
+              f"[net-of-fees] {ep} is rendered and waiting at Gate 2",
+              f"The story {ep} has been rendered on GitHub.\n\n"
+              f"Watch it:\n  {run}\n\n"
+              "Happy with it? Run the `publish` workflow with this id.\n"
+              "Nothing is public until you do.",
+          )
+          print("notified", ch.to)
+          PY

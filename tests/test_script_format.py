@@ -184,3 +184,53 @@ def test_the_file_engine_reads_the_script_as_written(tmp_path):
     ep.ensure_dirs()
     ep.script.write_text("[SCENE 1]\n\nIMAGE: a tree\n\nA line.\n")
     assert "IMAGE: a tree" in _from_file(ep)
+
+
+def test_a_committed_story_is_found_when_the_episode_has_none(
+        tmp_path, monkeypatch):
+    """`episodes/` is gitignored, correctly -- it fills with video. So a
+    script written only there can never be seen by a machine that is
+    not this one, which tied the whole pipeline to one laptop."""
+    from pipeline.manifest import Episode
+    from pipeline.stages import script_gen
+
+    stories = tmp_path / "stories"
+    stories.mkdir()
+    (stories / "s1.md").write_text("[SCENE 1]\n\nIMAGE: a tree\n\nA line.\n")
+    monkeypatch.setattr(script_gen, "STORIES_DIR", stories)
+
+    ep = Episode("s1", tmp_path / "episodes")
+    ep.ensure_dirs()
+    assert "IMAGE: a tree" in script_gen._from_file(ep)
+
+
+def test_the_episodes_own_script_wins_over_the_committed_one(
+        tmp_path, monkeypatch):
+    """Editing locally must not be silently overridden by what was
+    pushed."""
+    from pipeline.manifest import Episode
+    from pipeline.stages import script_gen
+
+    stories = tmp_path / "stories"
+    stories.mkdir()
+    (stories / "s2.md").write_text("[SCENE 1]\n\nthe committed one\n")
+    monkeypatch.setattr(script_gen, "STORIES_DIR", stories)
+
+    ep = Episode("s2", tmp_path / "episodes")
+    ep.ensure_dirs()
+    ep.script.write_text("[SCENE 1]\n\nthe local one\n")
+    assert "the local one" in script_gen._from_file(ep)
+
+
+def test_neither_place_having_a_script_names_both(tmp_path, monkeypatch):
+    import pytest as _pytest
+
+    from pipeline.errors import ConfigError
+    from pipeline.manifest import Episode
+    from pipeline.stages import script_gen
+
+    monkeypatch.setattr(script_gen, "STORIES_DIR", tmp_path / "stories")
+    ep = Episode("s3", tmp_path / "episodes")
+    ep.ensure_dirs()
+    with _pytest.raises(ConfigError, match="stories"):
+        script_gen._from_file(ep)

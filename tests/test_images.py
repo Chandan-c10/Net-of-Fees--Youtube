@@ -936,3 +936,52 @@ def test_a_fetched_picture_is_stripped_before_it_is_stored(local, tmp_path):
     images.fetch_one("a village", out, 576, 1024, 1,
                      chain=("pollinations",), open_url=open_url)
     assert Image.open(out).height < 924
+
+
+# ---- redrawing one bad scene ------------------------------------------
+
+
+def test_redraw_clears_only_the_scenes_named(episode, story, tmp_path):
+    """A generator gets scenes wrong in ways no check can catch: two
+    crows where the prompt said one, an animal inside a pot."""
+    from pipeline.stages import images as stage
+
+    sources = episode.dir / "sources"
+    sources.mkdir(parents=True, exist_ok=True)
+    for scene in story.scenes:
+        (sources / f"{scene.slug}.png").write_bytes(_png())
+
+    stage.redraw(episode, story, [2])
+    assert not (sources / "scene_02.png").exists()
+    assert (sources / "scene_01.png").exists()
+    assert (sources / "scene_03.png").exists()
+
+
+def test_redraw_also_forgets_the_library_copy(episode, story, tmp_path,
+                                              monkeypatch):
+    """Otherwise the wrong picture is the one reused next time."""
+    from pipeline import image_library
+    from pipeline.stages import images as stage
+
+    monkeypatch.setenv("IMAGE_REUSE", "1")
+    drawn = tmp_path / "drawn.png"
+    drawn.write_bytes(_png())
+    scene = story.scenes[1]
+    image_library.add(scene.image_prompt, drawn,
+                      {"provider": "cloudflare", "license": "generated"})
+    assert len(image_library.load()) == 1
+
+    sources = episode.dir / "sources"
+    sources.mkdir(parents=True, exist_ok=True)
+    (sources / f"{scene.slug}.png").write_bytes(_png())
+
+    stage.redraw(episode, story, [scene.index])
+    assert image_library.load() == []
+
+
+def test_redrawing_a_scene_that_does_not_exist_says_so(episode, story):
+    from pipeline.errors import StageError
+    from pipeline.stages import images as stage
+
+    with pytest.raises(StageError, match="no scene"):
+        stage.redraw(episode, story, [99])
