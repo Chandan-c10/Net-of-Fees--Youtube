@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 
+from ..config import env_int
 from ..errors import ConfigError, StageError
 from ..logging_setup import get
 from ..manifest import Episode, Manifest, Scene
@@ -427,7 +428,19 @@ def _ask_gemini(prompt: str) -> str:
     genai.configure(api_key=key)
     model = genai.GenerativeModel(os.getenv("GEMINI_MODEL",
                                             "gemini-3.8-flash"))
-    resp = model.generate_content(prompt)
+    # The client's own deadline is 60 seconds, and a twenty-five scene
+    # story does not always come back inside it. Two scheduled runs in a
+    # row died on "504 Deadline Exceeded", and the retry around this
+    # reissued the same 60-second request three times, so waiting longer
+    # was never actually tried.
+    timeout = env_int("GEMINI_TIMEOUT_SEC", 300)
+    try:
+        resp = model.generate_content(
+            prompt, request_options={"timeout": timeout})
+    except TypeError:
+        # An older client without request_options. Better a short
+        # deadline than no script at all.
+        resp = model.generate_content(prompt)
     text = getattr(resp, "text", None)
     if not text:
         raise StageError("Gemini returned an empty response")

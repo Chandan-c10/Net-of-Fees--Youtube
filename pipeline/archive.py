@@ -31,6 +31,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import shutil
 import urllib.error
 import urllib.parse
@@ -73,21 +74,82 @@ _USAGE_CACHE: dict[str, tuple[float, int]] = {}
 CACHE_SECONDS = 300
 
 
+def _unreachable(target: Target, reason) -> StageError:
+    """A network error, with the setting that probably caused it.
+
+    "Temporary failure in name resolution" is a true description of
+    what the resolver did and tells the reader nothing about what to
+    change. If a setting cannot be right, say so here: the hostname in
+    the error is one nobody typed, and nobody will connect it to a
+    secret pasted with a trailing newline.
+    """
+    said = [f"could not reach the bucket at {target.endpoint}: {reason}"]
+    said.extend(target.complaints())
+    if len(said) == 1 and "resolution" in str(reason).lower():
+        said.append(
+            "The host does not resolve. Check R2_ACCOUNT_ID (and "
+            "R2_ENDPOINT, if set) for stray spaces or a newline -- a "
+            "value pasted into a web form often carries one, and it "
+            "builds a hostname that cannot exist."
+        )
+    return StageError("\n  ".join(said))
+
+
+# A Cloudflare account id as the dashboard gives it.
+_ACCOUNT_SHAPE = re.compile(r"[0-9a-f]{32}")
+
+
+def _setting(name: str) -> str:
+    """One environment value, with the whitespace taken off."""
+    return (os.getenv(name) or "").strip()
+
+
 class Target:
     """Where archives go, assembled from the environment."""
 
     def __init__(self) -> None:
-        self.account = os.getenv("R2_ACCOUNT_ID")
-        self.bucket = os.getenv("R2_BUCKET")
-        self.key_id = os.getenv("R2_ACCESS_KEY_ID")
-        self.secret = os.getenv("R2_SECRET_ACCESS_KEY")
-        self.region = os.getenv("R2_REGION", DEFAULT_REGION)
+        # Stripped, every one. A secret pasted into a web form arrives
+        # with a trailing newline often enough that it is the first
+        # thing to rule out -- and an account id with a newline in it
+        # builds a hostname that cannot resolve, so the error that comes
+        # back talks about DNS and never mentions the setting that
+        # caused it. Three alerts in a day said "Temporary failure in
+        # name resolution" while the same code worked locally.
+        self.account = _setting("R2_ACCOUNT_ID")
+        self.bucket = _setting("R2_BUCKET")
+        self.key_id = _setting("R2_ACCESS_KEY_ID")
+        self.secret = _setting("R2_SECRET_ACCESS_KEY")
+        self.region = _setting("R2_REGION") or DEFAULT_REGION
         # Set when the bucket is served on a domain of your own.
-        self.public_base = os.getenv("R2_PUBLIC_BASE_URL", "").rstrip("/")
+        self.public_base = _setting("R2_PUBLIC_BASE_URL").rstrip("/")
         # Any S3-compatible endpoint; R2's is derived from the account.
-        self.endpoint = os.getenv("R2_ENDPOINT") or (
+        self.endpoint = _setting("R2_ENDPOINT") or (
             f"https://{self.account}.r2.cloudflarestorage.com"
             if self.account else "")
+
+    def complaints(self) -> list[str]:
+        """Settings that are present but cannot be right.
+
+        Checked before a request rather than after, because the failure
+        a bad value produces is a network error that names a hostname
+        nobody typed.
+        """
+        out = []
+        if self.account and not _ACCOUNT_SHAPE.fullmatch(self.account):
+            looks_like_url = "//" in self.account or "." in self.account
+            out.append(
+                f"R2_ACCOUNT_ID is {self.account[:12]!r}..., which is not an "
+                f"account id"
+                + (" -- it looks like a URL. The id is the 32-character "
+                   "string in the dashboard, not the endpoint; set "
+                   "R2_ENDPOINT if you mean to give a whole address."
+                   if looks_like_url else
+                   ". It is 32 hex characters in the Cloudflare dashboard.")
+            )
+        if self.bucket and ("/" in self.bucket or " " in self.bucket):
+            out.append(f"R2_BUCKET is {self.bucket!r}, which is a name, "
+                       f"not a path")
+        return out
 
     @property
     def configured(self) -> bool:
@@ -176,8 +238,7 @@ def bucket_usage(target: Target | None = None,
                 f"could not list the bucket to check its size: {exc.code}"
             ) from exc
         except urllib.error.URLError as exc:
-            raise StageError(
-                f"could not reach the bucket: {exc.reason}") from exc
+            raise _unreachable(target, exc.reason) from exc
         total += sum(sizes)
         if not token:
             break
@@ -248,8 +309,7 @@ def _list_objects(target: Target) -> list[tuple[str, int, str]]:
         except urllib.error.HTTPError as exc:
             raise StageError(f"could not list the bucket: {exc.code}") from exc
         except urllib.error.URLError as exc:
-            raise StageError(f"could not reach the bucket: {exc.reason}"
-                             ) from exc
+            raise _unreachable(target, exc.reason) from exc
 
         root = ET.fromstring(body)
         token = None

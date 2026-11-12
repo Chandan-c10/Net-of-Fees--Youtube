@@ -407,6 +407,15 @@ def cmd_doctor(args) -> int:
         except ImportError:
             problems.append(f"{mod} not installed -- pip install -r requirements.txt")
     print()
+    # A storage setting that cannot be right is worth saying here,
+    # where someone is already asking what is wrong, rather than in a
+    # resolver error at two in the morning.
+    try:
+        from pipeline import archive
+        problems.extend(archive.Target().complaints())
+    except Exception:
+        pass
+
     if problems:
         for p in problems:
             print(f"    PROBLEM  {p}")
@@ -878,7 +887,29 @@ def cmd_notify_test(args) -> int:
     return 0 if ok else 1
 
 
-def _fail(exc: BaseException) -> int:
+def _where(exc: BaseException, args=None) -> str | None:
+    """Which part of the pipeline broke.
+
+    A stage names itself. A top-level command does not, so a failure in
+    `archive --restore-library` arrived as "StageError in pipeline" --
+    true, useless, and the reader still has to work out whether the
+    bucket was being read, written or expired.
+    """
+    stage = getattr(exc, "stage", None)
+    if stage:
+        return stage
+    command = getattr(args, "command", None) if args else None
+    if not command:
+        return None
+    # The flag that distinguishes `archive --backup` from
+    # `archive --restore-library` is part of the answer.
+    for flag in ("restore_library", "backup", "prune", "restore"):
+        if getattr(args, flag, False):
+            return f"{command} --{flag.replace('_', '-')}"
+    return command
+
+
+def _fail(exc: BaseException, args=None) -> int:
     """Report a failure to the user, by mail if they configured it.
 
     Alerting lives here because this is the only point both dispatch paths
@@ -886,7 +917,7 @@ def _fail(exc: BaseException) -> int:
     one thing an unattended pipeline cannot afford.
     """
     notify.failure(getattr(exc, "episode_id", None),
-                   getattr(exc, "stage", None), exc,
+                   _where(exc, args), exc,
                    getattr(exc, "log_path", None))
     print(f"\n  {type(exc).__name__}: {exc}", file=sys.stderr)
     print(f"  {recovery.describe(exc)}", file=sys.stderr)
@@ -964,7 +995,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             return cmd_status(args) if args.status else cmd_run(args)
         except PipelineError as exc:
-            return _fail(exc)
+            return _fail(exc, args)
         except Exception as exc:  # unexpected: alert, then let it surface
             notify.failure(getattr(exc, "episode_id", None),
                            getattr(exc, "stage", None), exc)
@@ -978,7 +1009,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return args.func(args)
     except PipelineError as exc:
-        return _fail(exc)
+        return _fail(exc, args)
     except Exception as exc:  # unexpected: alert, then let it surface
         notify.failure(None, None, exc)
         raise

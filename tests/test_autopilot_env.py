@@ -162,3 +162,104 @@ def test_no_step_condition_reads_secrets():
             f"{path.name}: a step `if` cannot see `secrets`; it would be "
             f"false forever. Read the job's `env` instead: {found}"
         )
+
+
+# ---- a step allowed to fail must be noticed --------------------------
+#
+# `continue-on-error` is right for a step whose failure should not kill
+# the run, and it also paints the step green. The picture library failed
+# to download on the first run that got that far; the step reported
+# success, the video came out as walls of text, and nothing said why.
+
+
+def test_a_step_allowed_to_fail_is_watched():
+    import yaml
+
+    workflow = yaml.safe_load(
+        (WORKFLOWS / "autopilot.yml").read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["make"]["steps"]
+    body = "\n".join(str(s.get("run", "")) for s in steps)
+
+    for step in steps:
+        if not step.get("continue-on-error"):
+            continue
+        name = step.get("name", "?")
+        # The reporting step is the thing doing the watching; it cannot
+        # watch itself, and its failure is already visible as no mail.
+        if name == "Say what happened":
+            continue
+        assert step.get("id"), (
+            f"{name!r} may fail silently and has no id, so nothing can "
+            f"read its outcome"
+        )
+        assert f"steps.{step['id']}.outcome" in body, (
+            f"{name!r} may fail silently and no step reads "
+            f"steps.{step['id']}.outcome; a green step that failed is a "
+            f"lie told to the only person reading"
+        )
+
+
+# ---- the model needs longer than the client's default ----------------
+
+
+def test_gemini_is_given_a_deadline_it_can_meet(monkeypatch):
+    """Two scheduled runs died on "504 Deadline Exceeded".
+
+    The retry around the script stage reissued the same 60-second
+    request three times, so waiting longer was never actually tried.
+    """
+    import sys
+    import types
+
+    from pipeline.stages import script_gen
+
+    seen = {}
+
+    class FakeModel:
+        def __init__(self, name):
+            seen["model"] = name
+
+        def generate_content(self, prompt, **kwargs):
+            seen["kwargs"] = kwargs
+            return types.SimpleNamespace(text="# A story\n")
+
+    fake = types.ModuleType("google.generativeai")
+    fake.configure = lambda **k: None
+    fake.GenerativeModel = FakeModel
+    google = types.ModuleType("google")
+    google.generativeai = fake
+    monkeypatch.setitem(sys.modules, "google", google)
+    monkeypatch.setitem(sys.modules, "google.generativeai", fake)
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    monkeypatch.delenv("GEMINI_TIMEOUT_SEC", raising=False)
+
+    script_gen._ask_gemini("write a story")
+    assert seen["kwargs"]["request_options"]["timeout"] == 300, (
+        "the call went out on the client's own 60-second deadline"
+    )
+
+
+def test_the_gemini_deadline_is_settable(monkeypatch):
+    import sys
+    import types
+
+    from pipeline.stages import script_gen
+
+    seen = {}
+
+    class FakeModel:
+        def __init__(self, name):
+            pass
+
+        def generate_content(self, prompt, **kwargs):
+            seen.update(kwargs)
+            return types.SimpleNamespace(text="# A story\n")
+
+    fake = types.ModuleType("google.generativeai")
+    fake.configure = lambda **k: None
+    fake.GenerativeModel = FakeModel
+    monkeypatch.setitem(sys.modules, "google.generativeai", fake)
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    monkeypatch.setenv("GEMINI_TIMEOUT_SEC", "90")
+    script_gen._ask_gemini("write a story")
+    assert seen["request_options"]["timeout"] == 90

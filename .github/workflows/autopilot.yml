@@ -94,6 +94,7 @@ jobs:
       # already been made has to come from the bucket, or the queue
       # would start again at the first title every single morning.
       - name: Remember what has already been made
+        id: remember
         continue-on-error: true
         run: |
           python - <<'PY'
@@ -147,8 +148,29 @@ jobs:
           head -40 "episodes/$ID/script.md"
 
       - name: Fetch the picture library
+        id: library
         continue-on-error: true
         run: python run.py archive --restore-library
+
+      # `continue-on-error` is right here -- a missing library must not
+      # kill a run -- but it also paints the step green, and a step that
+      # says "success" after failing is lying to the only person reading.
+      # The library is what a scene borrows from when every generator is
+      # out of quota, so without it the video comes out as walls of text
+      # and nothing has said why.
+      - name: Note what is missing
+        if: always()
+        run: |
+          note() {
+            echo "::warning title=degraded::$1"
+            echo "DEGRADED=$1" >> "$GITHUB_ENV"
+          }
+          if [ "${{ steps.remember.outcome }}" != "success" ]; then
+            note "the record of past episodes did not load, so the queue may remake a story"
+          fi
+          if [ "${{ steps.library.outcome }}" != "success" ]; then
+            note "the picture library did not arrive, so scenes no provider could draw are text rather than pictures"
+          fi
 
       - name: Render it
         env:
@@ -177,6 +199,7 @@ jobs:
         run: rm -f secrets/youtube_token.json
 
       - name: Back it up
+        id: backup
         if: always()
         continue-on-error: true
         run: python run.py archive --backup
@@ -216,11 +239,17 @@ jobs:
           left = queue.report()
           run = ("https://github.com/${{ github.repository }}/actions/runs/"
                  "${{ github.run_id }}")
+          degraded = os.getenv("DEGRADED", "")
+          if "${{ steps.backup.outcome }}" not in ("success", ""):
+              degraded = ((degraded + "; ") if degraded else "") + (
+                  "the backup did not run, so this episode exists only on "
+                  "a runner that is about to be destroyed")
           ch.send(
-              f"{title}",
+              f"{title}" + (" (degraded)" if degraded else ""),
               (f"{title}\n\n"
                + (f"Published: {video}\n\n" if video else
                   f"Rendered and waiting. {run}\n\n")
+               + (f"WENT WRONG: {degraded}\n\n" if degraded else "")
                + f"{left['remaining']} stories left in the queue.\n"
                + ("ADD MORE TITLES -- the queue is empty after this one.\n"
                   if left["remaining"] <= 1 else "")),

@@ -185,3 +185,48 @@ def test_the_sent_message_carries_the_shaped_subject(monkeypatch):
     monkeypatch.setenv("ALERT_EMAIL", "b@example.com")
     notify.Channel().send("the render failed", "body")
     assert sent["subject"] == 'Net-of-Fees "the render failed"'
+
+
+# ---- an alert should say which part broke -----------------------------
+
+
+def test_a_command_failure_names_the_command():
+    """"StageError in pipeline" is true, useless, and what arrived.
+
+    The reader still has to work out whether the bucket was being read,
+    written or expired.
+    """
+    import argparse
+
+    import run
+    from pipeline.errors import StageError
+
+    args = argparse.Namespace(command="archive", restore_library=True,
+                              backup=False, prune=False, restore=None)
+    assert run._where(StageError("no dns"), args) == "archive --restore-library"
+
+    args.restore_library, args.backup = False, True
+    assert run._where(StageError("no dns"), args) == "archive --backup"
+
+
+def test_a_stage_still_names_itself():
+    import argparse
+
+    import run
+    from pipeline.errors import StageError
+
+    exc = StageError("nothing drawn")
+    exc.stage = "images"
+    assert run._where(exc, argparse.Namespace(command="archive",
+                                              backup=True)) == "images"
+
+
+def test_a_command_with_no_flags_names_itself():
+    import argparse
+
+    import run
+    from pipeline.errors import StageError
+
+    assert run._where(StageError("x"),
+                      argparse.Namespace(command="doctor")) == "doctor"
+    assert run._where(StageError("x")) is None

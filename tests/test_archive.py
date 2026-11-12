@@ -658,3 +658,64 @@ def test_an_unreadable_record_means_keep(configured, monkeypatch):
 
     monkeypatch.setattr(archive, "read_object", explode)
     assert archive.episode_was_posted("001", configured, {}) is False
+
+
+# ---- a setting that cannot be right should say so ---------------------
+#
+# Three alerts in one day read "could not reach the bucket: [Errno -3]
+# Temporary failure in name resolution" -- a true account of what the
+# resolver did, naming a hostname nobody typed, from runs where the same
+# code worked locally. Nothing connected it to a setting.
+
+
+def test_a_pasted_newline_is_taken_off(monkeypatch):
+    monkeypatch.setenv("R2_ACCOUNT_ID", "a" * 32 + "\n")
+    monkeypatch.setenv("R2_BUCKET", " bucket ")
+    monkeypatch.delenv("R2_ENDPOINT", raising=False)
+    target = archive.Target()
+    assert target.endpoint == f"https://{'a' * 32}.r2.cloudflarestorage.com"
+    assert target.bucket == "bucket"
+    assert not target.complaints()
+
+
+def test_an_account_id_that_is_a_url_is_named(monkeypatch):
+    monkeypatch.setenv("R2_ACCOUNT_ID",
+                       "https://abc.r2.cloudflarestorage.com")
+    monkeypatch.delenv("R2_ENDPOINT", raising=False)
+    said = " ".join(archive.Target().complaints())
+    assert "R2_ACCOUNT_ID" in said and "looks like a URL" in said
+
+
+def test_a_short_account_id_is_named(monkeypatch):
+    monkeypatch.setenv("R2_ACCOUNT_ID", "abc123")
+    monkeypatch.delenv("R2_ENDPOINT", raising=False)
+    said = " ".join(archive.Target().complaints())
+    assert "32 hex characters" in said
+
+
+def test_a_bucket_that_is_a_path_is_named(monkeypatch):
+    monkeypatch.setenv("R2_ACCOUNT_ID", "a" * 32)
+    monkeypatch.setenv("R2_BUCKET", "my-bucket/episodes")
+    said = " ".join(archive.Target().complaints())
+    assert "R2_BUCKET" in said
+
+
+def test_a_dns_failure_points_at_the_setting(monkeypatch):
+    monkeypatch.setenv("R2_ACCOUNT_ID", "a" * 32)
+    monkeypatch.delenv("R2_ENDPOINT", raising=False)
+    message = str(archive._unreachable(
+        archive.Target(), "[Errno -3] Temporary failure in name resolution"))
+    assert "R2_ACCOUNT_ID" in message, (
+        "a resolver error must name something the reader can change"
+    )
+    assert "newline" in message
+
+
+def test_a_reachable_failure_is_not_blamed_on_a_setting(monkeypatch):
+    """Do not invent a cause for a plain connection refusal."""
+    monkeypatch.setenv("R2_ACCOUNT_ID", "a" * 32)
+    monkeypatch.delenv("R2_ENDPOINT", raising=False)
+    message = str(archive._unreachable(archive.Target(),
+                                       "[Errno 111] Connection refused"))
+    assert "newline" not in message
+    assert "Connection refused" in message
