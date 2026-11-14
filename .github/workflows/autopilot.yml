@@ -21,15 +21,25 @@ name: autopilot
 # as a secret with the value `true` blanks the word `true` out of every
 # line this workflow prints.
 
+# TWO A DAY, one for each publishing slot. That is what the free image
+# quota affords: an episode costs around twenty-five generated pictures
+# and Cloudflare gives roughly forty to sixty a day, so a third and
+# fourth video would be drawn from an empty well and come out borrowed.
+#
+# THE TIMES ARE APPROXIMATE AND CANNOT BE MADE EXACT. GitHub runs
+# free-tier scheduled workflows late -- measured here at 4.8 to 7.8
+# hours over five runs -- so these crons are set early to compensate
+# for the usual delay rather than to say when the video appears. A run
+# publishes when it finishes. If a posting time ever has to be exact,
+# the mechanism is already there: render ahead, set publish_after to a
+# slot, and let publish-due release it.
+
 on:
   schedule:
-    - cron: "40 9 * * *"   # 15:10 IST
-    # TEMPORARY, for today only: a second slot to watch the whole chain
-    # run on the `schedule` event, which is the one the gates treat as
-    # unattended. A manual run proves less, because pressing the button
-    # is itself the human decision a gate asks for. Remove once a
-    # scheduled run has published.
-    - cron: "35 12 * * *"  # 18:05 IST
+    # Aimed at the 08:30 IST slot, allowing for the usual lateness.
+    - cron: "0 20 * * *"   # 01:30 IST; lands ~08:30 IST when late
+    # Aimed at the 19:30 IST slot.
+    - cron: "0 7 * * *"    # 12:30 IST; lands ~19:30 IST when late
   workflow_dispatch:
     inputs:
       title:
