@@ -719,3 +719,39 @@ def test_a_reachable_failure_is_not_blamed_on_a_setting(monkeypatch):
                                        "[Errno 111] Connection refused"))
     assert "newline" not in message
     assert "Connection refused" in message
+
+
+def test_an_endpoint_given_as_the_account_id_still_works(monkeypatch):
+    """Forgiven, because being strict cost four days of silence.
+
+    The dashboard shows the id and the endpoint beside each other. The
+    wrong one pasted into R2_ACCOUNT_ID built
+    https://https://<id>.r2...com.r2...com, which cannot resolve, so
+    every run reported DNS trouble for a hostname nobody typed: no
+    backup, no picture library, and the queue remaking one story each
+    time because nothing recorded that it had been made.
+    """
+    url = "https://eaecd46dcbad28d73e615191b38a3d95.r2.cloudflarestorage.com"
+    monkeypatch.setenv("R2_ACCOUNT_ID", url)
+    monkeypatch.setenv("R2_BUCKET", "b")
+    monkeypatch.setenv("R2_ACCESS_KEY_ID", "k")
+    monkeypatch.setenv("R2_SECRET_ACCESS_KEY", "s")
+    monkeypatch.delenv("R2_ENDPOINT", raising=False)
+    target = archive.Target()
+    assert target.endpoint == url, "the address was pasted inside an address"
+    assert target.configured
+
+
+def test_forgiving_it_does_not_mean_hiding_it(monkeypatch):
+    """`doctor` must still say the setting is wrong."""
+    monkeypatch.setenv(
+        "R2_ACCOUNT_ID",
+        "https://eaecd46dcbad28d73e615191b38a3d95.r2.cloudflarestorage.com")
+    monkeypatch.delenv("R2_ENDPOINT", raising=False)
+    assert any("R2_ACCOUNT_ID" in c for c in archive.Target().complaints())
+
+
+def test_an_explicit_endpoint_still_wins(monkeypatch):
+    monkeypatch.setenv("R2_ACCOUNT_ID", "https://wrong.example.com")
+    monkeypatch.setenv("R2_ENDPOINT", "https://right.example.com")
+    assert archive.Target().endpoint == "https://right.example.com"

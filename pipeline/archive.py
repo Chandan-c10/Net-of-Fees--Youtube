@@ -104,6 +104,10 @@ def _setting(name: str) -> str:
     return (os.getenv(name) or "").strip()
 
 
+def _looks_like_url(value: str) -> bool:
+    return value.startswith(("http://", "https://"))
+
+
 class Target:
     """Where archives go, assembled from the environment."""
 
@@ -123,9 +127,24 @@ class Target:
         # Set when the bucket is served on a domain of your own.
         self.public_base = _setting("R2_PUBLIC_BASE_URL").rstrip("/")
         # Any S3-compatible endpoint; R2's is derived from the account.
+        #
+        # An account id given as a whole address is used as the address
+        # rather than pasted inside one. The dashboard shows the id and
+        # the endpoint next to each other, so taking the wrong one is an
+        # easy mistake -- and the cost of being strict about it was four
+        # days of a channel backing nothing up while every run reported
+        # a DNS failure for a hostname nobody typed. `complaints()`
+        # still names it, so this forgives the input without hiding it.
         self.endpoint = _setting("R2_ENDPOINT") or (
-            f"https://{self.account}.r2.cloudflarestorage.com"
+            self.account if _looks_like_url(self.account)
+            else f"https://{self.account}.r2.cloudflarestorage.com"
             if self.account else "")
+        if _looks_like_url(self.account):
+            # The id is in there; recover it so signing and the error
+            # messages both talk about the same account.
+            found = _ACCOUNT_SHAPE.search(self.account)
+            if found:
+                self.account_id_from_url = found.group(0)
 
     def complaints(self) -> list[str]:
         """Settings that are present but cannot be right.
