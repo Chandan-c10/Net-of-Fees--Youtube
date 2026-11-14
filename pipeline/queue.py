@@ -57,12 +57,28 @@ def titles(path: Path | None = None) -> list[str]:
     return out
 
 
+def _was_posted(manifest: dict) -> bool:
+    """Whether this episode actually went out somewhere."""
+    for row in manifest.get("platform_posts") or []:
+        if row.get("status") == "posted" or row.get("external_id"):
+            return True
+    return False
+
+
 def made(episodes_dir: Path | None = None) -> set[str]:
-    """Every title an episode already carries.
+    """Every title that has actually been published.
 
     Read from the manifests rather than from a list of what has been
     done, because a list of what has been done is a second place for
     the truth to live and the two will disagree.
+
+    A record is not a video. A draft that got as far as a script and
+    stopped used to count here, so one abandoned test episode removed
+    "The Jackal and the Drum" from the queue for good: the story was
+    never made, never posted, and never offered again. Counting only
+    what went out also makes a failed run self-healing -- tomorrow
+    picks the same story up and finishes it, instead of stepping over
+    it and leaving a hole in the channel.
     """
     episodes_dir = episodes_dir or EPISODES_DIR
     if not episodes_dir.exists():
@@ -74,11 +90,11 @@ def made(episodes_dir: Path | None = None) -> set[str]:
         if not manifest.exists():
             continue
         try:
-            title = json.loads(manifest.read_text(encoding="utf-8")).get(
-                "title", "")
+            data = json.loads(manifest.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if title:
+        title = data.get("title", "")
+        if title and _was_posted(data):
             # The published title carries a search suffix; the story's
             # own name is what the queue holds.
             done.add(_key(title.split("|")[0]))

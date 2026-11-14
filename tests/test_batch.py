@@ -125,8 +125,11 @@ def test_a_title_already_made_is_skipped(tmp_path):
     q.write_text("- The Blue Jackal\n- The Talkative Tortoise\n")
     episodes = tmp_path / "episodes"
     (episodes / "e1").mkdir(parents=True)
+    # Posted, because that is what retires a title now: a record is
+    # not a video, and a draft that never went out must stay offered.
     (episodes / "e1" / "manifest.json").write_text(json.dumps(
-        {"title": "The Blue Jackal | Panchatantra Stories for Kids"}))
+        {"title": "The Blue Jackal | Panchatantra Stories for Kids",
+         "platform_posts": [{"platform": "youtube", "status": "posted", "external_id": "x"}]}))
 
     assert queue.remaining(q, episodes) == ["The Talkative Tortoise"]
     assert queue.next_title(q, episodes) == "The Talkative Tortoise"
@@ -143,7 +146,7 @@ def test_an_empty_queue_is_reported_not_ignored(tmp_path):
     episodes = tmp_path / "episodes"
     (episodes / "e1").mkdir(parents=True)
     (episodes / "e1" / "manifest.json").write_text(
-        json.dumps({"title": "The Blue Jackal"}))
+        json.dumps({"title": "The Blue Jackal", "platform_posts": [{"platform": "youtube", "status": "posted", "external_id": "x"}]}))
 
     report = queue.report(q, episodes)
     assert report["exhausted"] is True
