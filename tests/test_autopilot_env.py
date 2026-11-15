@@ -263,3 +263,71 @@ def test_the_gemini_deadline_is_settable(monkeypatch):
     monkeypatch.setenv("GEMINI_TIMEOUT_SEC", "90")
     script_gen._ask_gemini("write a story")
     assert seen["request_options"]["timeout"] == 90
+
+
+def _fake_genai(monkeypatch, failing: set[str]):
+    """A google.generativeai whose named models raise."""
+    import sys
+    import types
+
+    asked = []
+
+    class FakeModel:
+        def __init__(self, name):
+            self.name = name
+
+        def generate_content(self, prompt, **kwargs):
+            asked.append(self.name)
+            if self.name in failing:
+                raise RuntimeError("504 Deadline Exceeded")
+            return types.SimpleNamespace(text="# A story\n")
+
+    fake = types.ModuleType("google.generativeai")
+    fake.configure = lambda **k: None
+    fake.GenerativeModel = FakeModel
+    monkeypatch.setitem(sys.modules, "google.generativeai", fake)
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    return asked
+
+
+def test_a_second_model_is_asked_when_the_first_gives_up(monkeypatch):
+    """Three scheduled runs died on a 504 from the service itself.
+
+    The request already had 300 seconds; retrying the same overloaded
+    model is retrying the same overload.
+    """
+    from pipeline.stages import script_gen
+
+    asked = _fake_genai(monkeypatch, failing={"primary"})
+    monkeypatch.setenv("GEMINI_MODEL", "primary")
+    monkeypatch.setenv("GEMINI_FALLBACK_MODEL", "spare")
+    assert script_gen._ask_gemini("write a story").startswith("# A story")
+    assert asked == ["primary", "spare"]
+
+
+def test_without_a_fallback_the_failure_is_raised(monkeypatch):
+    from pipeline.stages import script_gen
+
+    _fake_genai(monkeypatch, failing={"primary"})
+    monkeypatch.setenv("GEMINI_MODEL", "primary")
+    monkeypatch.delenv("GEMINI_FALLBACK_MODEL", raising=False)
+    try:
+        script_gen._ask_gemini("write a story")
+    except RuntimeError as exc:
+        assert "504" in str(exc)
+    else:
+        raise AssertionError("the failure was swallowed")
+
+
+def test_the_same_model_twice_is_not_a_fallback(monkeypatch):
+    """Naming the primary as the spare must not double the wait."""
+    from pipeline.stages import script_gen
+
+    asked = _fake_genai(monkeypatch, failing={"primary"})
+    monkeypatch.setenv("GEMINI_MODEL", "primary")
+    monkeypatch.setenv("GEMINI_FALLBACK_MODEL", "primary")
+    try:
+        script_gen._ask_gemini("write a story")
+    except RuntimeError:
+        pass
+    assert asked == ["primary"]

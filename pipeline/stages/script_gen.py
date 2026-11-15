@@ -434,13 +434,31 @@ def _ask_gemini(prompt: str) -> str:
     # reissued the same 60-second request three times, so waiting longer
     # was never actually tried.
     timeout = env_int("GEMINI_TIMEOUT_SEC", 300)
+
+    def ask(which):
+        try:
+            return which.generate_content(
+                prompt, request_options={"timeout": timeout})
+        except TypeError:
+            # An older client without request_options. Better a short
+            # deadline than no script at all.
+            return which.generate_content(prompt)
+
     try:
-        resp = model.generate_content(
-            prompt, request_options={"timeout": timeout})
-    except TypeError:
-        # An older client without request_options. Better a short
-        # deadline than no script at all.
-        resp = model.generate_content(prompt)
+        resp = ask(model)
+    except Exception as exc:
+        # A 504 from the service itself, not the deadline: the request
+        # was given 300 seconds and the API still gave up. Three
+        # scheduled runs died this way in two days, and a retry against
+        # the same model is a retry against the same overload. A second
+        # model is the only thing that changes the odds.
+        spare = os.getenv("GEMINI_FALLBACK_MODEL", "").strip()
+        if not spare or spare == os.getenv("GEMINI_MODEL",
+                                           "gemini-3.8-flash"):
+            raise
+        get(None, "script").warning(
+            f"{type(exc).__name__} from the first model; asking {spare}")
+        resp = ask(genai.GenerativeModel(spare))
     text = getattr(resp, "text", None)
     if not text:
         raise StageError("Gemini returned an empty response")

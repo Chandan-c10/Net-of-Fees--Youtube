@@ -59,6 +59,7 @@ jobs:
       VOICE_ENGINE: kokoro
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || vars.GEMINI_API_KEY }}
       GEMINI_MODEL: ${{ vars.GEMINI_MODEL || secrets.GEMINI_MODEL }}
+      GEMINI_FALLBACK_MODEL: ${{ vars.GEMINI_FALLBACK_MODEL || secrets.GEMINI_FALLBACK_MODEL }}
       AUTO_APPROVE_GATE_1: ${{ vars.AUTO_APPROVE_GATE_1 || secrets.AUTO_APPROVE_GATE_1 }}
       AUTO_APPROVE_GATE_2: ${{ vars.AUTO_APPROVE_GATE_2 || secrets.AUTO_APPROVE_GATE_2 }}
       YOUTUBE_PRIVACY: ${{ vars.YOUTUBE_PRIVACY || secrets.YOUTUBE_PRIVACY }}
@@ -177,10 +178,15 @@ jobs:
             echo "::warning title=degraded::$1"
             echo "DEGRADED=$1" >> "$GITHUB_ENV"
           }
-          if [ "${{ steps.remember.outcome }}" != "success" ]; then
+          # "failure", not "not success". A step that never ran because
+          # an earlier one failed reports "skipped", and calling that
+          # degraded invents a second problem: a run that died writing
+          # the script was reported as having lost its picture library,
+          # which it had never reached.
+          if [ "${{ steps.remember.outcome }}" = "failure" ]; then
             note "the record of past episodes did not load, so the queue may remake a story"
           fi
-          if [ "${{ steps.library.outcome }}" != "success" ]; then
+          if [ "${{ steps.library.outcome }}" = "failure" ]; then
             note "the picture library did not arrive, so scenes no provider could draw are text rather than pictures"
           fi
 
@@ -251,16 +257,26 @@ jobs:
           left = queue.report()
           run = ("https://github.com/${{ github.repository }}/actions/runs/"
                  "${{ github.run_id }}")
+          # A run that failed before the render must not be described as
+          # waiting: "Rendered and waiting" was sent for an episode that
+          # died writing its script, with no video anywhere.
+          rendered = pathlib.Path(f"episodes/{eid}/out/video.mp4").exists()
           degraded = os.getenv("DEGRADED", "")
-          if "${{ steps.backup.outcome }}" not in ("success", ""):
+          if "${{ steps.backup.outcome }}" == "failure":
               degraded = ((degraded + "; ") if degraded else "") + (
                   "the backup did not run, so this episode exists only on "
                   "a runner that is about to be destroyed")
+          if video:
+              state = f"Published: {video}\n\n"
+          elif rendered:
+              state = f"Rendered and waiting. {run}\n\n"
+          else:
+              state = f"FAILED before a video existed. {run}\n\n"
           ch.send(
-              f"{title}" + (" (degraded)" if degraded else ""),
+              f"{title}" + (" (degraded)" if degraded
+                            else "" if video or rendered else " (failed)"),
               (f"{title}\n\n"
-               + (f"Published: {video}\n\n" if video else
-                  f"Rendered and waiting. {run}\n\n")
+               + state
                + (f"WENT WRONG: {degraded}\n\n" if degraded else "")
                + f"{left['remaining']} stories left in the queue.\n"
                + ("ADD MORE TITLES -- the queue is empty after this one.\n"
