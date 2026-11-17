@@ -107,7 +107,7 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-voice.txt
           pip install -r requirements-publish.txt
-          pip install google-generativeai
+          pip install google-genai
 
       # The episodes directory is not in the repository, so what has
       # already been made has to come from the bucket, or the queue

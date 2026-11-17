@@ -203,91 +203,83 @@ def test_a_step_allowed_to_fail_is_watched():
 
 
 def test_gemini_is_given_a_deadline_it_can_meet(monkeypatch):
-    """Two scheduled runs died on "504 Deadline Exceeded".
+    """Scheduled runs died on "504 Deadline Exceeded".
 
-    The retry around the script stage reissued the same 60-second
-    request three times, so waiting longer was never actually tried.
+    The client's own deadline is far shorter than a twenty-five scene
+    story takes. HttpOptions counts in milliseconds.
     """
-    import sys
-    import types
-
     from pipeline.stages import script_gen
 
-    seen = {}
-
-    class FakeModel:
-        def __init__(self, name):
-            seen["model"] = name
-
-        def generate_content(self, prompt, **kwargs):
-            seen["kwargs"] = kwargs
-            return types.SimpleNamespace(text="# A story\n")
-
-    fake = types.ModuleType("google.generativeai")
-    fake.configure = lambda **k: None
-    fake.GenerativeModel = FakeModel
-    google = types.ModuleType("google")
-    google.generativeai = fake
-    monkeypatch.setitem(sys.modules, "google", google)
-    monkeypatch.setitem(sys.modules, "google.generativeai", fake)
-    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    _asked, seen = _fake_genai(monkeypatch)
     monkeypatch.delenv("GEMINI_TIMEOUT_SEC", raising=False)
 
     script_gen._ask_gemini("write a story")
-    assert seen["kwargs"]["request_options"]["timeout"] == 300, (
-        "the call went out on the client's own 60-second deadline"
+    assert seen["http_options"] == {"timeout": 300_000}, (
+        "the call went out on the client's own short deadline"
     )
 
 
 def test_the_gemini_deadline_is_settable(monkeypatch):
-    import sys
-    import types
-
     from pipeline.stages import script_gen
 
-    seen = {}
-
-    class FakeModel:
-        def __init__(self, name):
-            pass
-
-        def generate_content(self, prompt, **kwargs):
-            seen.update(kwargs)
-            return types.SimpleNamespace(text="# A story\n")
-
-    fake = types.ModuleType("google.generativeai")
-    fake.configure = lambda **k: None
-    fake.GenerativeModel = FakeModel
-    monkeypatch.setitem(sys.modules, "google.generativeai", fake)
-    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    _asked, seen = _fake_genai(monkeypatch)
     monkeypatch.setenv("GEMINI_TIMEOUT_SEC", "90")
     script_gen._ask_gemini("write a story")
-    assert seen["request_options"]["timeout"] == 90
+    assert seen["http_options"] == {"timeout": 90_000}
 
 
-def _fake_genai(monkeypatch, failing: set[str]):
-    """A google.generativeai whose named models raise."""
+def test_the_data_engine_uses_the_same_transport(monkeypatch):
+    """Two copies of a client is two places to migrate next time."""
+    from pipeline.stages import script_gen
+
+    asked, seen = _fake_genai(monkeypatch)
+    monkeypatch.setenv("GEMINI_MODEL", "primary")
+    monkeypatch.setattr(script_gen, "_prompt", lambda m, d, p: "a prompt")
+    script_gen._from_gemini(_story_manifest(), {"title": "x"}, None)
+    assert asked == ["primary"]
+    assert seen["http_options"], "the shared deadline was not applied"
+
+
+def _fake_genai(monkeypatch, failing: set[str] = frozenset()):
+    """A stand-in for `google.genai`, which is what the code imports now.
+
+    Faked rather than reached: these tests must never touch the network,
+    and after the migration they briefly did -- five of them called
+    Google with an invalid key and failed on the reply.
+
+    Returns (asked, seen): the model names requested, and what the
+    client was built with.
+    """
     import sys
-    import types
+    import types as _t
 
-    asked = []
+    asked, seen = [], {}
 
-    class FakeModel:
-        def __init__(self, name):
-            self.name = name
-
-        def generate_content(self, prompt, **kwargs):
-            asked.append(self.name)
-            if self.name in failing:
+    class FakeModels:
+        def generate_content(self, model=None, contents=None, config=None):
+            asked.append(model)
+            if model in failing:
                 raise RuntimeError("504 Deadline Exceeded")
-            return types.SimpleNamespace(text="# A story\n")
+            return _t.SimpleNamespace(text="# A story\n")
 
-    fake = types.ModuleType("google.generativeai")
-    fake.configure = lambda **k: None
-    fake.GenerativeModel = FakeModel
-    monkeypatch.setitem(sys.modules, "google.generativeai", fake)
+    class FakeClient:
+        def __init__(self, api_key=None, http_options=None):
+            seen["api_key"] = api_key
+            seen["http_options"] = http_options
+            self.models = FakeModels()
+
+    fake_types = _t.ModuleType("google.genai.types")
+    fake_types.HttpOptions = lambda timeout=None: {"timeout": timeout}
+    fake_genai = _t.ModuleType("google.genai")
+    fake_genai.Client = FakeClient
+    fake_genai.types = fake_types
+
+    import google
+    monkeypatch.setitem(sys.modules, "google.genai", fake_genai)
+    monkeypatch.setitem(sys.modules, "google.genai.types", fake_types)
+    monkeypatch.setattr(google, "genai", fake_genai, raising=False)
     monkeypatch.setenv("GEMINI_API_KEY", "x")
-    return asked
+    return asked, seen
 
 
 def test_a_second_model_is_asked_when_the_first_gives_up(monkeypatch):
@@ -298,7 +290,7 @@ def test_a_second_model_is_asked_when_the_first_gives_up(monkeypatch):
     """
     from pipeline.stages import script_gen
 
-    asked = _fake_genai(monkeypatch, failing={"primary"})
+    asked, _seen = _fake_genai(monkeypatch, failing={"primary"})
     monkeypatch.setenv("GEMINI_MODEL", "primary")
     monkeypatch.setenv("GEMINI_FALLBACK_MODEL", "spare")
     assert script_gen._ask_gemini("write a story").startswith("# A story")
@@ -323,7 +315,7 @@ def test_the_same_model_twice_is_not_a_fallback(monkeypatch):
     """Naming the primary as the spare must not double the wait."""
     from pipeline.stages import script_gen
 
-    asked = _fake_genai(monkeypatch, failing={"primary"})
+    asked, _seen = _fake_genai(monkeypatch, failing={"primary"})
     monkeypatch.setenv("GEMINI_MODEL", "primary")
     monkeypatch.setenv("GEMINI_FALLBACK_MODEL", "primary")
     try:

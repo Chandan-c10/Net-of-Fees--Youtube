@@ -497,51 +497,48 @@ def _ask_gemini(prompt: str) -> str:
     Split out so the story engine and the data-shaped engines share one
     transport rather than one growing two copies of it.
     """
-    import os
     key = os.getenv("GEMINI_API_KEY")
     if not key:
         raise ConfigError("GEMINI_API_KEY is not set")
+    # `google-genai`, not `google-generativeai`. The older package was
+    # declared end of life -- "no longer receiving updates or bug
+    # fixes" -- while being the primary writer of a channel that
+    # publishes unattended twice a day. A library nobody is fixing
+    # breaks on a Sunday.
     try:
-        import google.generativeai as genai
+        from google import genai
+        from google.genai import types
     except ImportError as exc:
         raise ConfigError(
-            "google-generativeai is not installed. "
-            "pip install google-generativeai"
+            "google-genai is not installed. pip install google-genai"
         ) from exc
-    genai.configure(api_key=key)
-    model = genai.GenerativeModel(os.getenv("GEMINI_MODEL",
-                                            "gemini-3.8-flash"))
-    # The client's own deadline is 60 seconds, and a twenty-five scene
-    # story does not always come back inside it. Two scheduled runs in a
-    # row died on "504 Deadline Exceeded", and the retry around this
-    # reissued the same 60-second request three times, so waiting longer
-    # was never actually tried.
-    timeout = env_int("GEMINI_TIMEOUT_SEC", 300)
 
-    def ask(which):
-        try:
-            return which.generate_content(
-                prompt, request_options={"timeout": timeout})
-        except TypeError:
-            # An older client without request_options. Better a short
-            # deadline than no script at all.
-            return which.generate_content(prompt)
+    # The client's default deadline is measured in seconds and a
+    # twenty-five scene story does not always come back inside it.
+    # HttpOptions takes milliseconds.
+    timeout = env_int("GEMINI_TIMEOUT_SEC", 300)
+    client = genai.Client(
+        api_key=key,
+        http_options=types.HttpOptions(timeout=timeout * 1000))
+    wanted = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+
+    def ask(model_name):
+        return client.models.generate_content(
+            model=model_name, contents=prompt)
 
     try:
-        resp = ask(model)
+        resp = ask(wanted)
     except Exception as exc:
         # A 504 from the service itself, not the deadline: the request
-        # was given 300 seconds and the API still gave up. Three
-        # scheduled runs died this way in two days, and a retry against
-        # the same model is a retry against the same overload. A second
-        # model is the only thing that changes the odds.
+        # was given 300 seconds and the API still gave up. A retry
+        # against the same model is a retry against the same overload,
+        # so a second model is the only thing that changes the odds.
         spare = os.getenv("GEMINI_FALLBACK_MODEL", "").strip()
-        if not spare or spare == os.getenv("GEMINI_MODEL",
-                                           "gemini-3.8-flash"):
+        if not spare or spare == wanted:
             raise
         get(None, "script").warning(
-            f"{type(exc).__name__} from the first model; asking {spare}")
-        resp = ask(genai.GenerativeModel(spare))
+            f"{type(exc).__name__} from {wanted}; asking {spare}")
+        resp = ask(spare)
     text = getattr(resp, "text", None)
     if not text:
         raise StageError("Gemini returned an empty response")
@@ -642,19 +639,10 @@ def _from_gemini(m: Manifest, data: dict, profile) -> str:
             "GEMINI_API_KEY is not set. Use --script-engine template for an "
             "offline run, or export the key."
         )
-    try:
-        import google.generativeai as genai
-    except ImportError as exc:
-        raise ConfigError(
-            "google-generativeai is not installed. "
-            "pip install google-generativeai, or use --script-engine template"
-        ) from exc
-    genai.configure(api_key=key)
-    model = genai.GenerativeModel(os.getenv("GEMINI_MODEL", "gemini-3.8-flash"))
-    resp = model.generate_content(_prompt(m, data, profile))
-    if not getattr(resp, "text", None):
-        raise StageError("Gemini returned an empty response")
-    return resp.text
+    # One transport, shared with the story engine: the deadline, the
+    # fallback model and the fence-stripping are worth having here too,
+    # and two copies of a client is two places to migrate next time.
+    return _ask_gemini(_prompt(m, data, profile))
 
 
 def _from_ollama(m: Manifest, data: dict, profile) -> str:
