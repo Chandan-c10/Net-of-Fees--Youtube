@@ -388,8 +388,14 @@ def test_groq_is_not_asked_when_gemini_works(monkeypatch):
     assert called == ["gemini"], "the fallback ran on a healthy day"
 
 
-def test_the_first_failure_is_raised_when_everything_fails(monkeypatch):
-    """The reader needs the reason the primary failed, not the last one."""
+def test_when_everything_fails_the_reason_survives(monkeypatch):
+    """Carried in this pipeline's own error, so the retry can see it.
+
+    Superseding "the first failure is raised": the first one is not
+    necessarily the one worth acting on, and a foreign exception type
+    flies straight past `with_retry`.
+    """
+    from pipeline.errors import PipelineError
     from pipeline.stages import script_gen
 
     monkeypatch.setattr(script_gen, "_ask_gemini",
@@ -401,11 +407,13 @@ def test_the_first_failure_is_raised_when_everything_fails(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "x")
     monkeypatch.setenv("GROQ_API_KEY", "y")
     monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.delenv("SCRIPT_ORDER", raising=False)
 
     try:
         script_gen._from_story(_story_manifest(), None)
-    except RuntimeError as exc:
+    except PipelineError as exc:
         assert "504" in str(exc)
+        assert str(exc).count("groq:") == 1, f"named twice: {exc}"
     else:
         raise AssertionError("both failed and nothing was raised")
 
@@ -549,3 +557,63 @@ def test_all_failures_hopeless_still_raises_one(monkeypatch):
         ("gemini", StageError("GEMINI_API_KEY is wrong")),
     ])
     assert "refused the key" in str(exc) or "GEMINI_API_KEY" in str(exc)
+
+
+def test_a_google_failure_reaches_the_retry_machinery(monkeypatch):
+    """Every Gemini 504 escaped the retry entirely, and nobody noticed.
+
+    `with_retry` catches PipelineError. google.api_core's
+    DeadlineExceeded is not one, so it flew past, was reported as
+    failing "in pipeline" with no stage, and was retried zero times --
+    though `classify` calls it transient and a second attempt often
+    works.
+    """
+    from pipeline.errors import PipelineError
+    from pipeline.recovery import classify
+    from pipeline.stages.script_gen import _as_stage_error
+
+    class DeadlineExceeded(Exception):
+        pass
+
+    wrapped = _as_stage_error("gemini", DeadlineExceeded("504 Deadline Exceeded"))
+    assert isinstance(wrapped, PipelineError), (
+        "with_retry will not see this, so it will never be retried"
+    )
+    assert classify(wrapped).retry_now
+    assert "504" in str(wrapped), "classify reads the text; keep it whole"
+    assert "gemini" in str(wrapped)
+
+
+def test_a_pipeline_error_is_passed_through_unchanged():
+    from pipeline.errors import StageError
+    from pipeline.stages.script_gen import _as_stage_error
+
+    own = StageError("groq refused the key")
+    assert _as_stage_error("groq", own) is own
+
+
+def test_both_writers_failing_is_retried_and_names_both(monkeypatch):
+    from pipeline.recovery import classify
+    from pipeline.stages import script_gen
+
+    class DeadlineExceeded(Exception):
+        pass
+
+    monkeypatch.setattr(script_gen, "_ask_gemini",
+                        lambda p: (_ for _ in ()).throw(
+                            DeadlineExceeded("504 Deadline Exceeded")))
+    monkeypatch.setattr(script_gen, "_ask_groq",
+                        lambda p: (_ for _ in ()).throw(
+                            script_gen.StageError("groq refused the key")))
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    monkeypatch.setenv("GROQ_API_KEY", "y")
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.delenv("SCRIPT_ORDER", raising=False)
+
+    try:
+        script_gen._from_story(_story_manifest(), None)
+    except Exception as exc:
+        assert classify(exc).retry_now, "the run would not be retried"
+        assert "504" in str(exc) and "groq" in str(exc)
+    else:
+        raise AssertionError("both failed and nothing was raised")

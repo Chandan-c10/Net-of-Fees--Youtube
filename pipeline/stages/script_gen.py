@@ -384,7 +384,13 @@ def _from_story(m: Manifest, profile) -> str:
         try:
             text = ask(prompt)
         except Exception as exc:
-            failures.append((name, exc))
+            # Wrapped at the boundary, because beyond it the pipeline's
+            # own machinery stops working. `with_retry` catches only
+            # PipelineError, so google's DeadlineExceeded escaped it
+            # entirely: every 504 from Gemini was reported as failing
+            # "in pipeline" and retried not once, though `classify`
+            # calls it transient and a second attempt often works.
+            failures.append((name, _as_stage_error(name, exc)))
             log.warning(f"{name} could not write it: "
                         f"{type(exc).__name__}: {str(exc)[:120]}")
             continue
@@ -392,6 +398,17 @@ def _from_story(m: Manifest, profile) -> str:
             log.info(f"written by {name} after {attempts[0][0]} failed")
         return text
     raise _worth_raising(failures)
+
+
+def _as_stage_error(writer: str, exc: Exception) -> Exception:
+    """A third party's exception, carried in this pipeline's own kind.
+
+    The message is kept whole: `classify` reads it to decide whether a
+    retry is worth trying, and "504" in the text is the whole signal.
+    """
+    if isinstance(exc, PipelineError):
+        return exc
+    return StageError(f"{writer}: {type(exc).__name__}: {exc}")
 
 
 def _worth_raising(failures: list[tuple[str, Exception]]) -> Exception:
@@ -413,8 +430,11 @@ def _worth_raising(failures: list[tuple[str, Exception]]) -> Exception:
     name, exc = min(failures,
                     key=lambda f: rank.get(classify(f[1]).kind, 3))
     if len(failures) > 1:
-        others = "; ".join(f"{n}: {str(e)[:80]}" for n, e in failures
-                           if n != name)
+        others = "; ".join(
+            # The writer's name is already on a wrapped failure; adding
+            # it again reads as "groq: groq: ...".
+            (str(e)[:90] if str(e).startswith(f"{n}:") else f"{n}: {str(e)[:80]}")
+            for n, e in failures if n != name)
         exc = type(exc)(f"{exc} (also tried -- {others})") \
             if isinstance(exc, PipelineError) else exc
     return exc
