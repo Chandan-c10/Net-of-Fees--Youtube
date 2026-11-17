@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -475,6 +476,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     cn = sub.add_parser("connect", help="authorise a YouTube channel")
     cn.add_argument("--channel", help="for a second channel")
+    cn.add_argument("--force", action="store_true",
+                    help="reconnect even though a token already exists")
     cn.set_defaults(func=cmd_connect)
 
     ba = sub.add_parser("batch", help="draft several episodes at once")
@@ -628,19 +631,63 @@ def cmd_health(args) -> int:
     return 1 if open_now else 0
 
 
+CONNECT_LOCK = Path(__file__).resolve().parent / "secrets" / ".connecting"
+
+
+def _already_connecting() -> int | None:
+    """The pid of a connect flow that is still running, if there is one."""
+    try:
+        pid = int(CONNECT_LOCK.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+    try:
+        os.kill(pid, 0)          # signal 0 only asks whether it is alive
+    except OSError:
+        return None
+    return pid
+
+
 def cmd_connect(args) -> int:
     """Authorise a YouTube channel through Google's loopback OAuth.
 
     The same flow tools/youtube_auth.py runs; here so the panel can
     start it. A browser opens on this machine, which is why it works
     locally and would not work from a hosted panel.
+
+    Refuses twice over, because both refusals were earned. A flow that
+    is already waiting for Google's callback must not be started again:
+    a second one re-opens the login page, and two processes sat waiting
+    for days asking for a password nobody needed to type. And a channel
+    that already has a token does not need connecting at all -- the
+    panel's button cannot know that, so it is checked here, where the
+    CLI and the panel both pass.
     """
     import subprocess
     import sys as _sys
+
+    running = _already_connecting()
+    if running is not None:
+        print(f"\n  a connect flow is already running (pid {running}).\n"
+              f"  Finish it in the browser, or stop it with: kill {running}\n",
+              file=sys.stderr)
+        return 1
+
+    token = channels.youtube_token_path(args.channel or "youtube")
+    if token.exists() and token.stat().st_size and not args.force:
+        print(f"\n  {token.name} already exists, so this channel is "
+              f"connected.\n  Nothing needs doing. To replace it anyway: "
+              f"run.py connect --force\n")
+        return 0
+
     tool = Path(__file__).resolve().parent / "tools" / "youtube_auth.py"
     argv = ["--channel", args.channel] if args.channel else []
-    proc = subprocess.run([_sys.executable, str(tool), *argv],
-                          timeout=600, check=False)
+    CONNECT_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    CONNECT_LOCK.write_text(str(os.getpid()), encoding="utf-8")
+    try:
+        proc = subprocess.run([_sys.executable, str(tool), *argv],
+                              timeout=600, check=False)
+    finally:
+        CONNECT_LOCK.unlink(missing_ok=True)
     return proc.returncode
 
 

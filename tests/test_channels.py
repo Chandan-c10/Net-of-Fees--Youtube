@@ -161,3 +161,87 @@ def test_the_auth_tool_writes_a_per_channel_file():
     assert token_path(None).name == "youtube_token.json"
     assert token_path("trading").name == "youtube_token_trading.json"
     assert token_path("TRADING").name == "youtube_token_trading.json"
+
+
+# ---- connecting a channel that is already connected -------------------
+#
+# The panel's button starts the flow unconditionally, so a stray click
+# re-opens Google's login. Two processes sat waiting for a callback for
+# days, asking for a password nobody needed to type.
+
+
+def _connect_args(channel=None, force=False):
+    import argparse
+
+    return argparse.Namespace(channel=channel, force=force, verbose=False)
+
+
+def test_connecting_when_a_token_exists_does_nothing(tmp_path, monkeypatch):
+    import run
+
+    token = tmp_path / "youtube_token.json"
+    token.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(run.channels, "youtube_token_path", lambda k: token)
+    monkeypatch.setattr(run, "CONNECT_LOCK", tmp_path / ".connecting")
+    started = []
+    monkeypatch.setattr("subprocess.run",
+                        lambda *a, **k: started.append(a) or None)
+
+    assert run.cmd_connect(_connect_args()) == 0
+    assert started == [], "a browser was opened for a connected channel"
+
+
+def test_force_connects_anyway(tmp_path, monkeypatch):
+    import subprocess
+
+    import run
+
+    token = tmp_path / "youtube_token.json"
+    token.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(run.channels, "youtube_token_path", lambda k: token)
+    monkeypatch.setattr(run, "CONNECT_LOCK", tmp_path / ".connecting")
+    started = []
+
+    def fake_run(*a, **k):
+        started.append(a)
+        return subprocess.CompletedProcess(a, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert run.cmd_connect(_connect_args(force=True)) == 0
+    assert len(started) == 1
+
+
+def test_a_second_flow_is_refused_while_one_is_running(tmp_path, monkeypatch):
+    """The actual symptom: the login page opening again and again."""
+    import os
+
+    import run
+
+    lock = tmp_path / ".connecting"
+    lock.write_text(str(os.getpid()), encoding="utf-8")   # alive by definition
+    monkeypatch.setattr(run, "CONNECT_LOCK", lock)
+    monkeypatch.setattr(run.channels, "youtube_token_path",
+                        lambda k: tmp_path / "absent.json")
+    started = []
+    monkeypatch.setattr("subprocess.run",
+                        lambda *a, **k: started.append(a) or None)
+
+    assert run.cmd_connect(_connect_args()) == 1
+    assert started == []
+
+
+def test_a_stale_lock_does_not_block_for_ever(tmp_path, monkeypatch):
+    """A crashed flow must not leave the door bolted."""
+    import subprocess
+
+    import run
+
+    lock = tmp_path / ".connecting"
+    lock.write_text("999999", encoding="utf-8")       # no such process
+    monkeypatch.setattr(run, "CONNECT_LOCK", lock)
+    monkeypatch.setattr(run.channels, "youtube_token_path",
+                        lambda k: tmp_path / "absent.json")
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **k: subprocess.CompletedProcess(a, 0))
+    assert run.cmd_connect(_connect_args()) == 0
+    assert not lock.exists(), "the lock was left behind"

@@ -102,7 +102,11 @@ FREE_PIXEL_CAP = {"pollinations": 589_824}
 # unconfigured provider costs a function call rather than a request --
 # which means listing them all by default is free, and configuring one
 # later needs no change here.
-DEFAULT_PROVIDERS = ("cloudflare", "together", "huggingface", "pollinations")
+# `together` is deliberately not here. Its adapter stays, for anyone
+# who pays for it, but it has no usable free tier -- so leaving it in
+# the default chain only printed "together needs TOGETHER_API_KEY" in
+# every failure line, pointing the reader at a dead end.
+DEFAULT_PROVIDERS = ("cloudflare", "huggingface", "pollinations")
 
 # Appended to every prompt so a single episode's pictures look like they
 # came from one hand. Overridable per profile and per run.

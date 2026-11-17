@@ -331,3 +331,104 @@ def test_the_same_model_twice_is_not_a_fallback(monkeypatch):
     except RuntimeError:
         pass
     assert asked == ["primary"]
+
+
+# ---- Gemini first, Groq when Gemini cannot -----------------------------
+
+
+def _story_manifest():
+    from pipeline.manifest import Manifest
+
+    m = Manifest.new("e1", recipe="story", profile="storyboard_shorts",
+                     voice="chandan_en", title="The Talkative Tortoise")
+    return m
+
+
+def test_groq_is_asked_only_after_gemini_fails(monkeypatch):
+    """A healthy day must cost exactly one request.
+
+    Gemini's prose is the register this channel was tuned to; Groq is
+    there because one scheduled run in four died on a 504.
+    """
+    from pipeline.stages import script_gen
+
+    called = []
+
+    def gemini(prompt):
+        called.append("gemini")
+        raise RuntimeError("504 Deadline Exceeded")
+
+    def groq(prompt):
+        called.append("groq")
+        return "# A story\n"
+
+    monkeypatch.setattr(script_gen, "_ask_gemini", gemini)
+    monkeypatch.setattr(script_gen, "_ask_groq", groq)
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    monkeypatch.setenv("GROQ_API_KEY", "y")
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+
+    assert script_gen._from_story(_story_manifest(), None) == "# A story\n"
+    assert called == ["gemini", "groq"]
+
+
+def test_groq_is_not_asked_when_gemini_works(monkeypatch):
+    from pipeline.stages import script_gen
+
+    called = []
+    monkeypatch.setattr(script_gen, "_ask_gemini",
+                        lambda p: called.append("gemini") or "# A story\n")
+    monkeypatch.setattr(script_gen, "_ask_groq",
+                        lambda p: called.append("groq") or "# Wrong\n")
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    monkeypatch.setenv("GROQ_API_KEY", "y")
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+
+    script_gen._from_story(_story_manifest(), None)
+    assert called == ["gemini"], "the fallback ran on a healthy day"
+
+
+def test_the_first_failure_is_raised_when_everything_fails(monkeypatch):
+    """The reader needs the reason the primary failed, not the last one."""
+    from pipeline.stages import script_gen
+
+    monkeypatch.setattr(script_gen, "_ask_gemini",
+                        lambda p: (_ for _ in ()).throw(
+                            RuntimeError("504 Deadline Exceeded")))
+    monkeypatch.setattr(script_gen, "_ask_groq",
+                        lambda p: (_ for _ in ()).throw(
+                            RuntimeError("groq is down")))
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    monkeypatch.setenv("GROQ_API_KEY", "y")
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+
+    try:
+        script_gen._from_story(_story_manifest(), None)
+    except RuntimeError as exc:
+        assert "504" in str(exc)
+    else:
+        raise AssertionError("both failed and nothing was raised")
+
+
+def test_groq_alone_is_enough(monkeypatch):
+    from pipeline.stages import script_gen
+
+    monkeypatch.setattr(script_gen, "_ask_groq", lambda p: "# A story\n")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.setenv("GROQ_API_KEY", "y")
+    assert script_gen._from_story(_story_manifest(), None) == "# A story\n"
+
+
+def test_no_model_at_all_says_which_keys_would_do(monkeypatch):
+    from pipeline.errors import ConfigError
+    from pipeline.stages import script_gen
+
+    for name in ("GEMINI_API_KEY", "GROQ_API_KEY", "OLLAMA_HOST"):
+        monkeypatch.delenv(name, raising=False)
+    try:
+        script_gen._from_story(_story_manifest(), None)
+    except ConfigError as exc:
+        assert "GROQ_API_KEY" in str(exc) and "GEMINI_API_KEY" in str(exc)
+    else:
+        raise AssertionError("a missing model was not reported")

@@ -21,7 +21,7 @@ from ..manifest import Episode, Manifest, Scene
 from ..script_format import parse, render, to_scenes, validate_against_snapshot
 from .export import load_snapshot
 
-ENGINES = ("file", "story", "template", "gemini", "ollama")
+ENGINES = ("file", "story", "template", "gemini", "groq", "ollama")
 
 # One deterministic template per recipe. Registered at the bottom of this
 # module, once every builder is defined.
@@ -46,6 +46,8 @@ def run(ep: Episode, m: Manifest, engine: str = "template", profile=None) -> Non
         text = builder(m, data, profile)
     elif engine == "gemini":
         text = _from_gemini(m, data, profile)
+    elif engine == "groq":
+        text = _ask_groq(_prompt(m, data, profile))
     elif engine == "ollama":
         text = _from_ollama(m, data, profile)
     else:
@@ -346,15 +348,40 @@ def _from_story(m: Manifest, profile) -> str:
             "the story engine writes a story by name, and this episode "
             "has no title. Create it with --title \"The Thirsty Crow\"."
         )
-    import os
+    prompt = story_prompt(m, profile)
+    log = get(m.id, "script")
+    # Gemini first, because its prose is the register this channel was
+    # tuned to over four rounds of rewriting. Groq second, because
+    # Gemini's free tier returned 504 on one scheduled run in four and
+    # a story that cannot be written is a slot that publishes nothing.
+    # Whichever is asked second only ever runs when the first has
+    # already failed, so a healthy day costs exactly one request.
+    attempts = []
     if os.getenv("GEMINI_API_KEY"):
-        return _ask_gemini(story_prompt(m, profile))
+        attempts.append(("gemini", _ask_gemini))
+    if os.getenv("GROQ_API_KEY"):
+        attempts.append(("groq", _ask_groq))
     if os.getenv("OLLAMA_HOST"):
-        return _ask_ollama(story_prompt(m, profile))
-    raise ConfigError(
-        "the story engine needs a model: set GEMINI_API_KEY (free tier "
-        "is enough) or run ollama and set OLLAMA_HOST."
-    )
+        attempts.append(("ollama", _ask_ollama))
+    if not attempts:
+        raise ConfigError(
+            "the story engine needs a model: set GEMINI_API_KEY or "
+            "GROQ_API_KEY (both have a free tier), or run ollama and "
+            "set OLLAMA_HOST."
+        )
+    first_failure = None
+    for name, ask in attempts:
+        try:
+            text = ask(prompt)
+        except Exception as exc:
+            first_failure = first_failure or exc
+            log.warning(f"{name} could not write it: "
+                        f"{type(exc).__name__}: {str(exc)[:120]}")
+            continue
+        if name != attempts[0][0]:
+            log.info(f"written by {name} after {attempts[0][0]} failed")
+        return text
+    raise first_failure
 
 
 def _from_file(ep: Episode) -> str:
@@ -463,6 +490,44 @@ def _ask_gemini(prompt: str) -> str:
     if not text:
         raise StageError("Gemini returned an empty response")
     # A model asked for a script sometimes wraps it in a fence anyway.
+    return text.strip().removeprefix("```markdown").removeprefix(
+        "```").removesuffix("```").strip()
+
+
+def _ask_groq(prompt: str) -> str:
+    """The same, against Groq.
+
+    Plain HTTP against the OpenAI-compatible endpoint rather than another
+    client library: one more dependency to install on every runner, for
+    one POST, is a poor trade. The free tier allows a thousand requests
+    a day against Gemini's twenty, which is the whole reason it is here.
+    """
+    import json as _json
+    import urllib.request
+    key = os.getenv("GROQ_API_KEY", "").strip()
+    if not key:
+        raise ConfigError("GROQ_API_KEY is not set")
+    payload = _json.dumps({
+        "model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": float(os.getenv("GROQ_TEMPERATURE", "0.8")),
+    }).encode()
+    request = urllib.request.Request(
+        "https://api.groq.com/openai/v1/chat/completions", data=payload,
+        headers={"Content-Type": "application/json",
+                 "Authorization": f"Bearer {key}"})
+    try:
+        with urllib.request.urlopen(
+                request, timeout=env_int("GROQ_TIMEOUT_SEC", 180)) as resp:
+            body = _json.loads(resp.read())
+    except Exception as exc:
+        raise StageError(f"could not reach groq: {exc}") from exc
+    try:
+        text = body["choices"][0]["message"]["content"]
+    except (KeyError, IndexError) as exc:
+        raise StageError(f"groq returned no script: {str(body)[:200]}") from exc
+    if not text.strip():
+        raise StageError("groq returned an empty response")
     return text.strip().removeprefix("```markdown").removeprefix(
         "```").removesuffix("```").strip()
 
