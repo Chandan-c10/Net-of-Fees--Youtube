@@ -504,6 +504,9 @@ def _ask_gemini(prompt: str) -> str:
         "```").removesuffix("```").strip()
 
 
+USER_AGENT = "net-of-fees/1.0 (+https://github.com/Chandan-c10)"
+
+
 def _ask_groq(prompt: str) -> str:
     """The same, against Groq.
 
@@ -513,6 +516,7 @@ def _ask_groq(prompt: str) -> str:
     a day against Gemini's twenty, which is the whole reason it is here.
     """
     import json as _json
+    import urllib.error
     import urllib.request
     key = os.getenv("GROQ_API_KEY", "").strip()
     if not key:
@@ -522,14 +526,32 @@ def _ask_groq(prompt: str) -> str:
         "messages": [{"role": "user", "content": prompt}],
         "temperature": float(os.getenv("GROQ_TEMPERATURE", "0.8")),
     }).encode()
+    # The User-Agent is not decoration. Groq sits behind Cloudflare,
+    # which refuses urllib's default signature with "403 error code:
+    # 1010" -- a bot block, returned before the request reaches Groq at
+    # all. The first run against Groq failed that way and read as a bad
+    # key, which it was not.
     request = urllib.request.Request(
         "https://api.groq.com/openai/v1/chat/completions", data=payload,
         headers={"Content-Type": "application/json",
+                 "User-Agent": USER_AGENT,
                  "Authorization": f"Bearer {key}"})
     try:
         with urllib.request.urlopen(
                 request, timeout=env_int("GROQ_TIMEOUT_SEC", 180)) as resp:
             body = _json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        detail = exc.read()[:200].decode(errors="replace")
+        if exc.code == 401:
+            raise StageError(
+                "groq refused the key: GROQ_API_KEY is wrong or revoked"
+            ) from exc
+        if exc.code == 403 and "1010" in detail:
+            raise StageError(
+                "groq's front door refused this client (Cloudflare 1010); "
+                "the request needs a User-Agent header"
+            ) from exc
+        raise StageError(f"groq returned {exc.code}: {detail}") from exc
     except Exception as exc:
         raise StageError(f"could not reach groq: {exc}") from exc
     try:

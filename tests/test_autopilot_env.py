@@ -469,3 +469,44 @@ def test_an_unknown_writer_is_refused(monkeypatch):
         assert "gpt5" in str(exc)
     else:
         raise AssertionError("a typo in SCRIPT_ORDER was accepted")
+
+
+def test_the_groq_request_identifies_itself(monkeypatch):
+    """Groq sits behind Cloudflare, which refuses urllib's default.
+
+    The first run against Groq came back "403 error code: 1010" -- a
+    bot block returned before Groq saw the request at all, which reads
+    exactly like a bad key and is not one.
+    """
+    import urllib.request
+
+    from pipeline.stages import script_gen
+
+    seen = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b'{"choices":[{"message":{"content":"# A story\\n"}}]}'
+
+    def fake_urlopen(request, timeout=None):
+        seen["headers"] = dict(request.header_items())
+        seen["url"] = request.full_url
+        return Response()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_x")
+    script_gen._ask_groq("write a story")
+
+    lowered = {k.lower(): v for k, v in seen["headers"].items()}
+    assert lowered.get("User-agent".lower()), (
+        "no User-Agent: Cloudflare refuses the request with 1010 before "
+        "Groq ever sees the key"
+    )
+    assert lowered["authorization"] == "Bearer gsk_x"
+    assert seen["url"].startswith("https://api.groq.com/")
