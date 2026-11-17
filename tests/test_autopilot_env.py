@@ -432,3 +432,40 @@ def test_no_model_at_all_says_which_keys_would_do(monkeypatch):
         assert "GROQ_API_KEY" in str(exc) and "GEMINI_API_KEY" in str(exc)
     else:
         raise AssertionError("a missing model was not reported")
+
+
+def test_the_writer_order_is_settable(monkeypatch):
+    """So the fallback can be exercised on purpose.
+
+    A second model reached only when the first fails is a second model
+    nobody has tested, and the moment you find out it was misconfigured
+    is the moment you needed it.
+    """
+    from pipeline.stages import script_gen
+
+    called = []
+    monkeypatch.setattr(script_gen, "_ask_gemini",
+                        lambda p: called.append("gemini") or "# A story\n")
+    monkeypatch.setattr(script_gen, "_ask_groq",
+                        lambda p: called.append("groq") or "# A story\n")
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    monkeypatch.setenv("GROQ_API_KEY", "y")
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.setenv("SCRIPT_ORDER", "groq,gemini")
+
+    script_gen._from_story(_story_manifest(), None)
+    assert called == ["groq"]
+
+
+def test_an_unknown_writer_is_refused(monkeypatch):
+    from pipeline.errors import ConfigError
+    from pipeline.stages import script_gen
+
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    monkeypatch.setenv("SCRIPT_ORDER", "gemini,gpt5")
+    try:
+        script_gen._from_story(_story_manifest(), None)
+    except ConfigError as exc:
+        assert "gpt5" in str(exc)
+    else:
+        raise AssertionError("a typo in SCRIPT_ORDER was accepted")

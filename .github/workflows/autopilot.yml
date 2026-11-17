@@ -50,6 +50,9 @@ on:
       profile:
         required: false
         default: storyboard_shorts
+      script_order:
+        description: "Which model writes it, in order (e.g. groq,gemini)"
+        required: false
 
 jobs:
   make:
@@ -62,6 +65,7 @@ jobs:
       GEMINI_FALLBACK_MODEL: ${{ vars.GEMINI_FALLBACK_MODEL || secrets.GEMINI_FALLBACK_MODEL }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY || vars.GROQ_API_KEY }}
       GROQ_MODEL: ${{ vars.GROQ_MODEL || secrets.GROQ_MODEL }}
+      SCRIPT_ORDER: ${{ inputs.script_order || vars.SCRIPT_ORDER || 'gemini,groq,ollama' }}
       AUTO_APPROVE_GATE_1: ${{ vars.AUTO_APPROVE_GATE_1 || secrets.AUTO_APPROVE_GATE_1 }}
       AUTO_APPROVE_GATE_2: ${{ vars.AUTO_APPROVE_GATE_2 || secrets.AUTO_APPROVE_GATE_2 }}
       YOUTUBE_PRIVACY: ${{ vars.YOUTUBE_PRIVACY || secrets.YOUTUBE_PRIVACY }}

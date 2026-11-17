@@ -356,13 +356,23 @@ def _from_story(m: Manifest, profile) -> str:
     # a story that cannot be written is a slot that publishes nothing.
     # Whichever is asked second only ever runs when the first has
     # already failed, so a healthy day costs exactly one request.
-    attempts = []
-    if os.getenv("GEMINI_API_KEY"):
-        attempts.append(("gemini", _ask_gemini))
-    if os.getenv("GROQ_API_KEY"):
-        attempts.append(("groq", _ask_groq))
-    if os.getenv("OLLAMA_HOST"):
-        attempts.append(("ollama", _ask_ollama))
+    # Order is settable so the fallback can be exercised deliberately.
+    # A second model that is only ever reached when the first fails is
+    # a second model nobody has tested, and the moment you find out it
+    # was misconfigured is the moment you needed it.
+    writers = {"gemini": (_ask_gemini, "GEMINI_API_KEY"),
+               "groq": (_ask_groq, "GROQ_API_KEY"),
+               "ollama": (_ask_ollama, "OLLAMA_HOST")}
+    order = [n.strip().lower()
+             for n in os.getenv("SCRIPT_ORDER", "gemini,groq,ollama").split(",")
+             if n.strip()]
+    unknown = [n for n in order if n not in writers]
+    if unknown:
+        raise ConfigError(
+            f"SCRIPT_ORDER names {', '.join(unknown)}; "
+            f"expected any of {', '.join(writers)}")
+    attempts = [(name, writers[name][0]) for name in order
+                if os.getenv(writers[name][1])]
     if not attempts:
         raise ConfigError(
             "the story engine needs a model: set GEMINI_API_KEY or "
