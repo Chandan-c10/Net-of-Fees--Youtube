@@ -510,3 +510,42 @@ def test_the_groq_request_identifies_itself(monkeypatch):
     )
     assert lowered["authorization"] == "Bearer gsk_x"
     assert seen["url"].startswith("https://api.groq.com/")
+
+
+def test_a_retryable_failure_is_the_one_raised(monkeypatch):
+    """Raising whichever failed first threw away the useful one.
+
+    Groq was refused at Cloudflare's door with a 403, which is not
+    retryable. Gemini returned 504, which is. The 403 was raised, the
+    retry said "unrecognised, so not retried", and the run was lost.
+    """
+    from pipeline.errors import StageError
+    from pipeline.recovery import classify
+    from pipeline.stages.script_gen import _worth_raising
+
+    exc = _worth_raising([
+        ("groq", StageError("could not reach groq: HTTP Error 403: Forbidden")),
+        ("gemini", StageError("504 Deadline Exceeded")),
+    ])
+    assert classify(exc).retry_now, "the run would not be retried"
+    assert "504" in str(exc)
+    assert "groq" in str(exc), "the other failure must still be readable"
+
+
+def test_the_only_failure_is_raised_unchanged(monkeypatch):
+    from pipeline.errors import StageError
+    from pipeline.stages.script_gen import _worth_raising
+
+    only = StageError("groq refused the key")
+    assert _worth_raising([("groq", only)]) is only
+
+
+def test_all_failures_hopeless_still_raises_one(monkeypatch):
+    from pipeline.errors import StageError
+    from pipeline.stages.script_gen import _worth_raising
+
+    exc = _worth_raising([
+        ("groq", StageError("groq refused the key")),
+        ("gemini", StageError("GEMINI_API_KEY is wrong")),
+    ])
+    assert "refused the key" in str(exc) or "GEMINI_API_KEY" in str(exc)

@@ -15,7 +15,7 @@ import os
 from pathlib import Path
 
 from ..config import env_int
-from ..errors import ConfigError, StageError
+from ..errors import ConfigError, PipelineError, StageError
 from ..logging_setup import get
 from ..manifest import Episode, Manifest, Scene
 from ..script_format import parse, render, to_scenes, validate_against_snapshot
@@ -379,19 +379,45 @@ def _from_story(m: Manifest, profile) -> str:
             "GROQ_API_KEY (both have a free tier), or run ollama and "
             "set OLLAMA_HOST."
         )
-    first_failure = None
+    failures: list[tuple[str, Exception]] = []
     for name, ask in attempts:
         try:
             text = ask(prompt)
         except Exception as exc:
-            first_failure = first_failure or exc
+            failures.append((name, exc))
             log.warning(f"{name} could not write it: "
                         f"{type(exc).__name__}: {str(exc)[:120]}")
             continue
         if name != attempts[0][0]:
             log.info(f"written by {name} after {attempts[0][0]} failed")
         return text
-    raise first_failure
+    raise _worth_raising(failures)
+
+
+def _worth_raising(failures: list[tuple[str, Exception]]) -> Exception:
+    """Of several failures, the one the caller can best act on.
+
+    Raising whichever came first threw away the useful one. Groq was
+    refused at Cloudflare's door -- a 403, not retryable -- and Gemini
+    returned a 504, which is. Because the 403 was raised, the retry
+    around this stage said "unrecognised, so not retried" and gave up
+    on an attempt that a second try would very likely have completed.
+
+    A run is worth retrying if ANY writer failed in a way that passes.
+    """
+    from ..recovery import classify
+
+    if not failures:                       # cannot happen; not a crash
+        return StageError("the script was not written and nothing said why")
+    rank = {"transient": 0, "later": 1, "needs_human": 2}
+    name, exc = min(failures,
+                    key=lambda f: rank.get(classify(f[1]).kind, 3))
+    if len(failures) > 1:
+        others = "; ".join(f"{n}: {str(e)[:80]}" for n, e in failures
+                           if n != name)
+        exc = type(exc)(f"{exc} (also tried -- {others})") \
+            if isinstance(exc, PipelineError) else exc
+    return exc
 
 
 def _from_file(ep: Episode) -> str:
