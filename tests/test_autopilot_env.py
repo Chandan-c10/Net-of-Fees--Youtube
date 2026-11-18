@@ -609,3 +609,78 @@ def test_both_writers_failing_is_retried_and_names_both(monkeypatch):
         assert "504" in str(exc) and "groq" in str(exc)
     else:
         raise AssertionError("both failed and nothing was raised")
+
+
+def test_the_manifest_records_which_model_wrote_it(monkeypatch):
+    """Nothing recorded the writer, and its absence cost a wrong call.
+
+    A story credited to the fallback had in fact been written by the
+    primary, after the fallback 404'd on a model Groq had retired in
+    August. The prose was then judged as the fallback's.
+    """
+    from pipeline.stages import script_gen
+
+    record = {}
+    monkeypatch.setattr(script_gen, "_ask_gemini",
+                        lambda p: (_ for _ in ()).throw(
+                            script_gen.StageError("503 UNAVAILABLE")))
+    monkeypatch.setattr(script_gen, "_ask_groq", lambda p: "# A story\n")
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    monkeypatch.setenv("GROQ_API_KEY", "y")
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.delenv("SCRIPT_ORDER", raising=False)
+
+    script_gen._from_story(_story_manifest(), None, record=record)
+    assert record == {"written_by": "groq"}
+
+
+def test_the_primary_is_recorded_too(monkeypatch):
+    from pipeline.stages import script_gen
+
+    record = {}
+    monkeypatch.setattr(script_gen, "_ask_gemini", lambda p: "# A story\n")
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.delenv("SCRIPT_ORDER", raising=False)
+
+    script_gen._from_story(_story_manifest(), None, record=record)
+    assert record == {"written_by": "gemini"}
+
+
+def test_a_retired_groq_model_says_what_to_use_instead(monkeypatch):
+    """A 404 on a hardcoded model name is a silent fallback failure."""
+    import urllib.error
+    import urllib.request
+
+    from pipeline.stages import script_gen
+
+    def refuse(request, timeout=None):
+        if request.full_url.endswith("/models"):
+            class R:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *a):
+                    return False
+
+                def read(self):
+                    return (b'{"data":[{"id":"openai/gpt-oss-120b"},'
+                            b'{"id":"qwen/qwen3.6-27b"}]}')
+            return R()
+        raise urllib.error.HTTPError(
+            request.full_url, 404, "Not Found", {},
+            __import__("io").BytesIO(b'{"error":{"message":"no such model"}}'))
+
+    monkeypatch.setattr(urllib.request, "urlopen", refuse)
+    monkeypatch.setenv("GROQ_API_KEY", "y")
+    monkeypatch.setenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    try:
+        script_gen._ask_groq("write a story")
+    except script_gen.StageError as exc:
+        assert "retired" in str(exc)
+        assert "openai/gpt-oss-120b" in str(exc), (
+            "the reader must be one setting away from working"
+        )
+    else:
+        raise AssertionError("a retired model was not reported")

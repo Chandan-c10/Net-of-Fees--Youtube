@@ -31,11 +31,16 @@ TEMPLATES: dict[str, object] = {}
 def run(ep: Episode, m: Manifest, engine: str = "template", profile=None) -> None:
     log = get(m.id, "script")
     data = load_snapshot(ep)
+    # Which model actually wrote it. Not recorded before, and its
+    # absence cost a wrong conclusion: a story the fallback was
+    # credited with had in fact been written by the primary, after the
+    # fallback 404'd on a model Groq had retired.
+    written: dict[str, str] = {}
 
     if engine == "file":
         text = _from_file(ep)
     elif engine == "story":
-        text = _from_story(m, profile)
+        text = _from_story(m, profile, record=written)
     elif engine == "template":
         builder = TEMPLATES.get(data.get("recipe", ""))
         if builder is None:
@@ -62,7 +67,8 @@ def run(ep: Episode, m: Manifest, engine: str = "template", profile=None) -> Non
     m.scenes = scenes
     ep.script.write_text(render(scenes, m.title), encoding="utf-8")
     m.mark_done("script", engine=engine, scenes=len(scenes),
-                words=sum(len(s.text.split()) for s in scenes))
+                words=sum(len(s.text.split()) for s in scenes),
+                **written)
     log.info(f"{len(scenes)} scenes, {sum(len(s.text.split()) for s in scenes)} words")
 
 
@@ -335,7 +341,7 @@ def story_prompt(m: Manifest, profile=None) -> str:
             "-- tell it in your own plain words.\n")
 
 
-def _from_story(m: Manifest, profile) -> str:
+def _from_story(m: Manifest, profile, record: dict | None = None) -> str:
     """A fable, written to order by whichever model is configured.
 
     The template engine knows two chart recipes and nothing else, which
@@ -394,6 +400,8 @@ def _from_story(m: Manifest, profile) -> str:
             log.warning(f"{name} could not write it: "
                         f"{type(exc).__name__}: {str(exc)[:120]}")
             continue
+        if record is not None:
+            record["written_by"] = name
         if name != attempts[0][0]:
             log.info(f"written by {name} after {attempts[0][0]} failed")
         return text
@@ -433,7 +441,7 @@ def _worth_raising(failures: list[tuple[str, Exception]]) -> Exception:
         others = "; ".join(
             # The writer's name is already on a wrapped failure; adding
             # it again reads as "groq: groq: ...".
-            (str(e)[:90] if str(e).startswith(f"{n}:") else f"{n}: {str(e)[:80]}")
+            (str(e)[:220] if str(e).startswith(f"{n}:") else f"{n}: {str(e)[:200]}")
             for n, e in failures if n != name)
         exc = type(exc)(f"{exc} (also tried -- {others})") \
             if isinstance(exc, PipelineError) else exc
@@ -549,6 +557,30 @@ def _ask_gemini(prompt: str) -> str:
 
 USER_AGENT = "net-of-fees/1.0 (+https://github.com/Chandan-c10)"
 
+# Groq's named replacement for the decommissioned llama-3.3-70b.
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
+
+
+def _groq_models(key: str) -> str:
+    """Which models this key can actually use, for a 404 message.
+
+    Asked only when a model has just been refused, so the reader is one
+    setting away from working rather than one search away.
+    """
+    import json as _json
+    import urllib.request
+    try:
+        request = urllib.request.Request(
+            "https://api.groq.com/openai/v1/models",
+            headers={"Authorization": f"Bearer {key}",
+                     "User-Agent": USER_AGENT})
+        with urllib.request.urlopen(request, timeout=30) as resp:
+            rows = _json.loads(resp.read()).get("data", [])
+    except Exception:
+        return "(could not list them)"
+    ids = sorted(r.get("id", "") for r in rows if r.get("id"))
+    return ", ".join(ids[:12]) or "(none)"
+
 
 def _ask_groq(prompt: str) -> str:
     """The same, against Groq.
@@ -565,7 +597,12 @@ def _ask_groq(prompt: str) -> str:
     if not key:
         raise ConfigError("GROQ_API_KEY is not set")
     payload = _json.dumps({
-        "model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+        # Groq retires models and the old default, llama-3.3-70b-versatile,
+        # was decommissioned in August. A 404 from a hardcoded model name
+        # is a silent fallback failure: the channel kept publishing
+        # because Gemini caught it, so nobody learned the spare tyre was
+        # flat until Gemini was down too.
+        "model": os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL),
         "messages": [{"role": "user", "content": prompt}],
         "temperature": float(os.getenv("GROQ_TEMPERATURE", "0.8")),
     }).encode()
@@ -594,6 +631,11 @@ def _ask_groq(prompt: str) -> str:
                 "groq's front door refused this client (Cloudflare 1010); "
                 "the request needs a User-Agent header"
             ) from exc
+        if exc.code == 404:
+            raise StageError(
+                f"groq has no model {os.getenv('GROQ_MODEL', DEFAULT_GROQ_MODEL)!r}"
+                f" -- it was probably retired. Set GROQ_MODEL to one of: "
+                f"{_groq_models(key)}") from exc
         raise StageError(f"groq returned {exc.code}: {detail}") from exc
     except Exception as exc:
         raise StageError(f"could not reach groq: {exc}") from exc
