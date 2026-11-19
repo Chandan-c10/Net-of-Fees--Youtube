@@ -130,6 +130,59 @@ def parse(text: str) -> list[ParsedScene]:
     return scenes
 
 
+def drop_silent_scenes(text: str) -> tuple[str, list[int]]:
+    """Remove scenes a model left with a picture and no words.
+
+    `parse` is strict on purpose: a script a person wrote with an empty
+    scene is a mistake they want told about. A generated one is
+    different -- a model occasionally emits a header and an IMAGE line
+    and forgets the narration, which costs a whole slot because scene
+    numbers must run 1..n with no gaps, so the episode cannot even be
+    repaired by deleting the scene.
+
+    A scene with no narration has no duration: nothing is said over it,
+    so nothing can be shown. Dropping it loses a picture, not a line of
+    the story. The survivors are renumbered, and the dropped numbers
+    are returned so the caller can say what happened.
+    """
+    blocks: list[tuple[str, list[str]]] = []
+    header: str | None = None
+    body: list[str] = []
+    preamble: list[str] = []
+    for line in text.splitlines():
+        if HEADER.match(line.strip()):
+            if header is not None:
+                blocks.append((header, body))
+            header, body = line, []
+        elif header is None:
+            preamble.append(line)
+        else:
+            body.append(line)
+    if header is not None:
+        blocks.append((header, body))
+
+    kept, dropped = [], []
+    for head, lines in blocks:
+        spoken = [ln for ln in lines
+                  if ln.strip() and not IMAGE_LINE.match(ln)]
+        if spoken:
+            kept.append((head, lines))
+        else:
+            m = HEADER.match(head.strip())
+            dropped.append(int(m.group(1)) if m else 0)
+
+    if not dropped:
+        return text, []
+
+    out = list(preamble)
+    for number, (head, lines) in enumerate(kept, start=1):
+        m = HEADER.match(head.strip())
+        attrs = m.group("attrs") if m else None
+        out.append(f"[SCENE {number}" + (f" |{attrs}]" if attrs else "]"))
+        out.extend(lines)
+    return "\n".join(out), dropped
+
+
 def to_scenes(parsed: list[ParsedScene], default_voice: str | None = None) -> list[Scene]:
     out: list[Scene] = []
     for p in parsed:

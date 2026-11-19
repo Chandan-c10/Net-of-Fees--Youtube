@@ -301,3 +301,70 @@ def test_nothing_is_appended_to_an_empty_script(monkeypatch):
 
     monkeypatch.delenv("OUTRO_LINE", raising=False)
     assert add_outro([]) is False
+
+
+# ---- a model that forgets the words -----------------------------------
+
+
+SILENT = """# The Mice That Ate Iron
+
+[SCENE 1 | voice: chandan_en]
+
+IMAGE: a merchant at his door
+
+Once upon a time, a merchant left his iron with a friend.
+
+[SCENE 2 | voice: chandan_en]
+
+IMAGE: a heap of rusting scales
+
+[SCENE 3 | voice: chandan_en]
+
+IMAGE: the merchant returning
+
+The moral of the story. Trickery answers trickery.
+"""
+
+
+def test_a_scene_with_a_picture_and_no_words_is_dropped():
+    """It costs a whole slot, because numbers must run 1..n with no gaps.
+
+    A scene nobody speaks over has no duration: nothing is said, so
+    nothing can be shown. Dropping it loses a picture, not a line.
+    """
+    from pipeline.script_format import drop_silent_scenes, parse
+
+    fixed, dropped = drop_silent_scenes(SILENT)
+    assert dropped == [2]
+    scenes = parse(fixed)
+    assert [s.index for s in scenes] == [1, 2], "the survivors were not renumbered"
+    assert scenes[1].text.startswith("The moral")
+    assert scenes[1].image == "the merchant returning"
+
+
+def test_a_sound_script_is_returned_untouched():
+    from pipeline.script_format import drop_silent_scenes
+
+    good = SILENT.replace("IMAGE: a heap of rusting scales\n",
+                          "IMAGE: a heap of rusting scales\n\nThe iron was gone.\n")
+    fixed, dropped = drop_silent_scenes(good)
+    assert dropped == []
+    assert fixed == good, "a sound script must not be rewritten"
+
+
+def test_the_scene_attributes_survive_renumbering():
+    from pipeline.script_format import drop_silent_scenes, parse
+
+    fixed, _ = drop_silent_scenes(SILENT)
+    assert all(s.attrs.get("voice") == "chandan_en" for s in parse(fixed))
+
+
+def test_a_hand_written_script_is_still_told_about_its_empty_scene():
+    """`parse` stays strict: the repair is for generated scripts only."""
+    import pytest
+
+    from pipeline.errors import ValidationError
+    from pipeline.script_format import parse
+
+    with pytest.raises(ValidationError, match="no narration"):
+        parse(SILENT)

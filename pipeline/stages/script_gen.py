@@ -18,7 +18,7 @@ from ..config import env_int
 from ..errors import ConfigError, PipelineError, StageError
 from ..logging_setup import get
 from ..manifest import Episode, Manifest, Scene
-from ..script_format import parse, render, to_scenes, validate_against_snapshot
+from ..script_format import drop_silent_scenes, parse, render, to_scenes, validate_against_snapshot
 from .export import load_snapshot
 
 ENGINES = ("file", "story", "template", "gemini", "groq", "ollama")
@@ -58,6 +58,14 @@ def run(ep: Episode, m: Manifest, engine: str = "template", profile=None) -> Non
     else:
         raise ConfigError(f"unknown script engine {engine!r}; expected {ENGINES}")
 
+    if engine not in ("file",):
+        # Repair a generated script, never one a person wrote: an empty
+        # scene in a hand-written script is a mistake they want told
+        # about, and in a generated one it is a slip that costs a slot.
+        text, silent = drop_silent_scenes(text)
+        if silent:
+            log.warning(f"dropped scene(s) {silent} with a picture and no "
+                        f"narration; the model left them empty")
     parsed = parse(text)
     scenes = to_scenes(parsed, default_voice=m.voice)
     validate_against_snapshot(scenes, data, profile)
