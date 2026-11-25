@@ -368,3 +368,95 @@ def test_a_hand_written_script_is_still_told_about_its_empty_scene():
 
     with pytest.raises(ValidationError, match="no narration"):
         parse(SILENT)
+
+
+# ---- a model having a bad moment is not a broken pipeline -------------
+
+
+class _Profile:
+    class visuals:
+        @staticmethod
+        def binds_data_keys():
+            return False
+
+
+GOOD_STORY = """# The Lion and the Woodcutter
+
+[SCENE 1 | voice: chandan_en]
+
+IMAGE: a woodcutter in a forest
+
+Once upon a time, a woodcutter walked into the forest.
+
+[SCENE 2 | voice: chandan_en]
+
+IMAGE: a lion resting
+
+The moral of the story. Kindness is repaid.
+"""
+
+
+def _stage(monkeypatch, answers, tmp_path, tries="3"):
+    """Drive the script stage against a model that answers badly first."""
+    import json
+
+    from pipeline.manifest import Episode, Manifest
+    from pipeline.stages import script_gen
+
+    given = list(answers)
+    seen_corrections = []
+
+    def fake_story(m, profile, record=None, correction=""):
+        seen_corrections.append(correction)
+        if record is not None:
+            record["written_by"] = "test"
+        return given.pop(0)
+
+    monkeypatch.setattr(script_gen, "_from_story", fake_story)
+    monkeypatch.setenv("SCRIPT_TRIES", tries)
+    ep = Episode("e1", tmp_path)
+    ep.ensure_dirs()
+    ep.snapshot.write_text(json.dumps({"title": "T", "kind": "story"}),
+                           encoding="utf-8")
+    m = Manifest.new("e1", recipe="story", profile="storyboard_shorts",
+                     voice="chandan_en", title="The Lion and the Woodcutter")
+    script_gen.run(ep, m, engine="story", profile=_Profile())
+    return m, seen_corrections
+
+
+def test_a_script_with_no_scene_headers_is_asked_for_again(tmp_path,
+                                                           monkeypatch):
+    """One of four slots lost in a week to a model's bad moment."""
+    m, corrections = _stage(monkeypatch,
+                            ["Here is your story, I hope you like it!", GOOD_STORY],
+                            tmp_path)
+    assert len(m.scenes) == 3, "the outro is scene 3"
+    assert "rejected" in corrections[1], "the model was not told what was wrong"
+    assert "SCENE" in corrections[1]
+
+
+def test_a_scene_with_no_image_line_is_asked_for_again(tmp_path, monkeypatch):
+    """Gate 1 catches this too, but only after the voice and pictures.
+
+    Caught at writing time it costs one more request; caught at the
+    gate it costs the slot.
+    """
+    no_picture = GOOD_STORY.replace("IMAGE: a lion resting\n\n", "")
+    m, corrections = _stage(monkeypatch, [no_picture, GOOD_STORY], tmp_path)
+    assert len(m.scenes) == 3
+    assert "no IMAGE line" in corrections[1]
+
+
+def test_a_good_script_is_not_asked_for_twice(tmp_path, monkeypatch):
+    _m, corrections = _stage(monkeypatch, [GOOD_STORY], tmp_path)
+    assert corrections == [""], "a sound script cost a second request"
+
+
+def test_it_gives_up_after_the_last_try(tmp_path, monkeypatch):
+    import pytest
+
+    from pipeline.errors import ValidationError
+
+    with pytest.raises(ValidationError):
+        _stage(monkeypatch, ["nonsense", "still nonsense"], tmp_path,
+               tries="2")

@@ -59,10 +59,16 @@ PRIVACY_CHOICES = ("private", "unlisted", "public")
 def default_privacy() -> str:
     """How a video goes out, unless a run says otherwise.
 
-    Private by default, and deliberately: while the Google project is
-    awaiting its API audit every upload is forced private anyway, and a
-    default that silently becomes public the day the audit clears is a
-    surprise nobody wants. Change it when you mean to.
+    Private by default, and deliberately -- but the original reason has
+    expired. Until 2 November 2026 YouTube locked every upload from an
+    unaudited API project to private, so the default merely described
+    what was going to happen anyway. That rule is gone: an unaudited
+    project can now publish publicly, and this default is the only
+    thing keeping a video unlisted.
+
+    It stays private all the same, because a default that turns a
+    channel public on the day a third party changes a policy is a
+    surprise nobody wants. Set YOUTUBE_PRIVACY when you mean to.
     """
     import os
     choice = os.getenv("YOUTUBE_PRIVACY", "private").strip().lower()
@@ -511,7 +517,11 @@ def run(ep: Episode, m: Manifest, dry_run: bool = False,
     video_id = response["id"]
     _set_thumbnail(youtube, ep, m, video_id, log)
     playlist_id = add_to_playlist(youtube, m, video_id, log)
-    row.update(status="posted", external_id=video_id, posted_at=_now())
+    # The privacy goes on the row, not only in the stage data. "Why is
+    # everything private?" took a web search to answer because nothing
+    # recorded what each upload had actually asked for.
+    row.update(status="posted", external_id=video_id, posted_at=_now(),
+               privacy=privacy)
     m.published_at = row["posted_at"]
     m.mark_done("upload", video_id=video_id, privacy=privacy,
                 tags=len(tags), channel=channel,

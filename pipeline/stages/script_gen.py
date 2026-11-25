@@ -15,7 +15,7 @@ import os
 from pathlib import Path
 
 from ..config import env_int
-from ..errors import ConfigError, PipelineError, StageError
+from ..errors import ConfigError, PipelineError, StageError, ValidationError
 from ..logging_setup import get
 from ..manifest import Episode, Manifest, Scene
 from ..script_format import drop_silent_scenes, parse, render, to_scenes, validate_against_snapshot
@@ -37,39 +37,66 @@ def run(ep: Episode, m: Manifest, engine: str = "template", profile=None) -> Non
     # fallback 404'd on a model Groq had retired.
     written: dict[str, str] = {}
 
-    if engine == "file":
-        text = _from_file(ep)
-    elif engine == "story":
-        text = _from_story(m, profile, record=written)
-    elif engine == "template":
-        builder = TEMPLATES.get(data.get("recipe", ""))
-        if builder is None:
-            raise ConfigError(
-                f"no script template for recipe {data.get('recipe')!r}. "
-                f"Known: {sorted(TEMPLATES)}"
-            )
-        text = builder(m, data, profile)
-    elif engine == "gemini":
-        text = _from_gemini(m, data, profile)
-    elif engine == "groq":
-        text = _ask_groq(_prompt(m, data, profile))
-    elif engine == "ollama":
-        text = _from_ollama(m, data, profile)
-    else:
+    def write(correction: str = "") -> str:
+        if engine == "file":
+            return _from_file(ep)
+        if engine == "story":
+            return _from_story(m, profile, record=written,
+                               correction=correction)
+        if engine == "template":
+            builder = TEMPLATES.get(data.get("recipe", ""))
+            if builder is None:
+                raise ConfigError(
+                    f"no script template for recipe {data.get('recipe')!r}. "
+                    f"Known: {sorted(TEMPLATES)}"
+                )
+            return builder(m, data, profile)
+        if engine == "gemini":
+            return _from_gemini(m, data, profile)
+        if engine == "groq":
+            return _ask_groq(_prompt(m, data, profile) + correction)
+        if engine == "ollama":
+            return _from_ollama(m, data, profile)
         raise ConfigError(f"unknown script engine {engine!r}; expected {ENGINES}")
 
-    if engine not in ("file",):
-        # Repair a generated script, never one a person wrote: an empty
-        # scene in a hand-written script is a mistake they want told
-        # about, and in a generated one it is a slip that costs a slot.
-        text, silent = drop_silent_scenes(text)
-        if silent:
-            log.warning(f"dropped scene(s) {silent} with a picture and no "
-                        f"narration; the model left them empty")
-    parsed = parse(text)
-    scenes = to_scenes(parsed, default_voice=m.voice)
-    validate_against_snapshot(scenes, data, profile)
-    _check_hook(scenes, profile)
+    # A model that returns the wrong shape is not a broken pipeline, it
+    # is a model having a bad moment -- and asking again, saying what
+    # was wrong, usually fixes it. Four slots were lost to this: a
+    # script with no scene headers at all, scenes with no IMAGE line,
+    # a scene with a picture and no words. Each was raised as a
+    # ValidationError, which classifies as needs_human, so nothing
+    # retried and the day published nothing.
+    tries = 1 if engine in ("file", "template") else env_int("SCRIPT_TRIES", 3)
+    correction = ""
+    for attempt in range(1, tries + 1):
+        text = write(correction)
+        if engine != "file":
+            # Repair a generated script, never one a person wrote: an
+            # empty scene in a hand-written script is a mistake they
+            # want told about, and in a generated one it costs a slot.
+            text, silent = drop_silent_scenes(text)
+            if silent:
+                log.warning(f"dropped scene(s) {silent} with a picture and "
+                            f"no narration; the model left them empty")
+        try:
+            parsed = parse(text)
+            scenes = to_scenes(parsed, default_voice=m.voice)
+            validate_against_snapshot(scenes, data, profile)
+            _check_hook(scenes, profile)
+            _check_pictures(scenes, profile)
+        except (ValidationError, StageError) as exc:
+            if attempt >= tries:
+                raise
+            log.warning(f"attempt {attempt}: {exc}; asking again")
+            correction = (
+                f"\n\nYour previous answer was rejected: {exc}\n"
+                f"Return ONLY the script, in exactly the format described "
+                f"above: a '# Title' line, then for every scene a "
+                f"'[SCENE n | voice: ...]' header, one 'IMAGE: ...' line, "
+                f"and at least one sentence of narration."
+            )
+            continue
+        break
     add_outro(scenes, m.voice)
 
     m.scenes = scenes
@@ -116,6 +143,30 @@ def add_outro(scenes: list, default_voice: str | None = None) -> bool:
         voice=getattr(last, "voice", None) or default_voice,
     ))
     return True
+
+
+def _check_pictures(scenes, profile=None) -> None:
+    """Every scene of a picture profile needs something to show.
+
+    Gate 1 already refuses an episode whose scenes would render as
+    title cards, but it refuses it after the voice has been narrated
+    and the pictures drawn -- too late to ask the model again. Checked
+    here, a missing IMAGE line costs one more request instead of a
+    slot.
+    """
+    if not scenes:
+        return
+    binds = getattr(getattr(profile, "visuals", None),
+                    "binds_data_keys", lambda: True)()
+    if binds:                       # a chart profile draws its own frames
+        return
+    missing = [s.index for s in scenes
+               if not (getattr(s, "image_prompt", "") or "").strip()]
+    if missing:
+        raise ValidationError(
+            f"scenes with no IMAGE line: {missing}. Every scene needs one, "
+            f"or it renders as a card of plain text."
+        )
 
 
 def _check_hook(scenes, profile=None) -> None:
@@ -349,7 +400,8 @@ def story_prompt(m: Manifest, profile=None) -> str:
             "-- tell it in your own plain words.\n")
 
 
-def _from_story(m: Manifest, profile, record: dict | None = None) -> str:
+def _from_story(m: Manifest, profile, record: dict | None = None,
+                correction: str = "") -> str:
     """A fable, written to order by whichever model is configured.
 
     The template engine knows two chart recipes and nothing else, which
@@ -362,7 +414,7 @@ def _from_story(m: Manifest, profile, record: dict | None = None) -> str:
             "the story engine writes a story by name, and this episode "
             "has no title. Create it with --title \"The Thirsty Crow\"."
         )
-    prompt = story_prompt(m, profile)
+    prompt = story_prompt(m, profile) + correction
     log = get(m.id, "script")
     # Gemini first, because its prose is the register this channel was
     # tuned to over four rounds of rewriting. Groq second, because
@@ -613,6 +665,12 @@ def _ask_groq(prompt: str) -> str:
         "model": os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL),
         "messages": [{"role": "user", "content": prompt}],
         "temperature": float(os.getenv("GROQ_TEMPERATURE", "0.8")),
+        # gpt-oss and the qwen3 family are reasoning models: left to
+        # themselves they put their thinking in `reasoning` and can
+        # return `content` empty, which arrives here as "groq returned
+        # an empty response" and costs a slot. Hidden means the answer
+        # comes back in content, where every other model puts it.
+        "reasoning_format": os.getenv("GROQ_REASONING_FORMAT", "hidden"),
     }).encode()
     # The User-Agent is not decoration. Groq sits behind Cloudflare,
     # which refuses urllib's default signature with "403 error code:
@@ -648,11 +706,20 @@ def _ask_groq(prompt: str) -> str:
     except Exception as exc:
         raise StageError(f"could not reach groq: {exc}") from exc
     try:
-        text = body["choices"][0]["message"]["content"]
+        message = body["choices"][0]["message"]
     except (KeyError, IndexError) as exc:
         raise StageError(f"groq returned no script: {str(body)[:200]}") from exc
+    text = message.get("content") or ""
     if not text.strip():
-        raise StageError("groq returned an empty response")
+        # A reasoning model that ignored reasoning_format still has the
+        # answer somewhere. Better a script out of the wrong field than
+        # a day with no video.
+        text = message.get("reasoning") or ""
+    if not text.strip():
+        finish = body["choices"][0].get("finish_reason", "?")
+        raise StageError(
+            f"groq returned an empty response (finish_reason={finish}); "
+            f"if the model is a reasoning one, set GROQ_REASONING_FORMAT")
     return text.strip().removeprefix("```markdown").removeprefix(
         "```").removesuffix("```").strip()
 

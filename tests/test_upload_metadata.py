@@ -450,3 +450,50 @@ def test_an_explicit_bad_privacy_is_refused():
         upload.normalise_privacy("pubic")
     assert upload.normalise_privacy("PUBLIC") == "public"
     assert upload.normalise_privacy(None) in upload.PRIVACY_CHOICES
+
+
+# ---- what each upload actually asked for ------------------------------
+
+
+def test_the_privacy_is_recorded_on_the_post_row():
+    """"Why is everything private?" should be answerable from the record.
+
+    Twenty videos went out before anyone asked, and the manifests could
+    not say what any of them had requested.
+    """
+    from pipeline.stages import upload
+
+    row = {"platform": "youtube", "status": "pending"}
+    row.update(status="posted", external_id="abc", posted_at="now",
+               privacy=upload.normalise_privacy("unlisted"))
+    assert row["privacy"] == "unlisted"
+
+
+def test_private_is_still_the_default(monkeypatch):
+    """A default that turns a channel public on a policy change is a
+    surprise nobody wants, even though YouTube stopped forcing private
+    on 2 November 2026."""
+    from pipeline.stages import upload
+
+    monkeypatch.delenv("YOUTUBE_PRIVACY", raising=False)
+    assert upload.default_privacy() == "private"
+    assert upload.normalise_privacy(None) == "private"
+
+
+def test_the_setting_is_what_makes_it_public(monkeypatch):
+    from pipeline.stages import upload
+
+    monkeypatch.setenv("YOUTUBE_PRIVACY", "public")
+    assert upload.default_privacy() == "public"
+    assert upload.normalise_privacy(None) == "public"
+
+
+def test_a_typo_is_refused_rather_than_quietly_ignored(monkeypatch):
+    import pytest
+
+    from pipeline.errors import PipelineError
+    from pipeline.stages import upload
+
+    monkeypatch.delenv("YOUTUBE_PRIVACY", raising=False)
+    with pytest.raises(PipelineError):
+        upload.normalise_privacy("pubic")
