@@ -13,6 +13,16 @@ PROFILE_NAME = "storyboard_shorts"
 DEFAULT_VOICE = "chandan_en"
 MOTION = "kenburns"
 
+# What the pictures look like. Read by pipeline/images.py, which falls
+# back to a photographic style when a profile says nothing -- and that
+# default fought the story contract, which was asking for a storybook
+# illustration at the same time. One source now, and it is this one.
+IMAGE_STYLE = (
+    "3D animated film still, stylised character animation, "
+    "soft global illumination, warm saturated colour, "
+    "rounded shapes, shallow depth of field"
+)
+
 # Instagram weights the leading tags most heavily.
 # Ordered by how people actually search for this, most specific first.
 # YouTube shows the first three above the title, so those three have to

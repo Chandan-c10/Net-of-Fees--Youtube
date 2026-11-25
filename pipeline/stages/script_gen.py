@@ -353,7 +353,10 @@ TELLING
 
 SHAPE
 
-- Between 18 and 32 scenes.
+- Between 12 and 16 scenes. The whole story must be tellable in
+  about sixty seconds of narration, which is the length a short
+  holds attention for; an episode twice that long is a story the
+  viewer leaves halfway through.
 - One or two short sentences per scene. Roughly 8 to 14 words.
 - Every scene gets its own IMAGE line.
 
@@ -382,7 +385,7 @@ PICTURES
   monkey only if every prompt says what he looks like.
 - Never put a camera inside an object. "cutaway view inside the pot"
   produced an animal inside the pot.
-- End every IMAGE line with: storybook illustration
+- End every IMAGE line with: 3D animated film still
 - No words, letters or signs in the picture.
 
 Output only the script. No explanation, no code fences.

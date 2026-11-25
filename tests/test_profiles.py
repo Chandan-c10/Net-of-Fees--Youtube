@@ -149,3 +149,36 @@ def test_every_profile_declares_a_youtube_category(name):
 @pytest.mark.parametrize("name", ALL_PROFILES)
 def test_every_profile_declares_a_language(name):
     assert getattr(profiles.load(name), "LANGUAGE", None)
+
+
+# ---- the look is decided in one place ---------------------------------
+
+
+def test_the_story_profiles_carry_a_3d_style():
+    """Set here rather than left to the photographic default.
+
+    The default fought the story contract, which was asking for a
+    storybook illustration while the suffix appended "photographic".
+    """
+    import profiles
+
+    for name in ("storyboard", "storyboard_shorts"):
+        style = getattr(profiles.load(name), "IMAGE_STYLE", "")
+        assert "3D animated" in style, f"{name} does not carry the style"
+
+
+def test_the_contract_asks_for_the_same_look_as_the_profile():
+    """Two sources that disagree is a prompt arguing with itself."""
+    import profiles
+    from pipeline.stages.script_gen import STORY_CONTRACT
+
+    assert "3D animated film still" in STORY_CONTRACT
+    assert "storybook illustration" not in STORY_CONTRACT
+    assert "3D animated" in profiles.load("storyboard_shorts").IMAGE_STYLE
+
+
+def test_the_contract_asks_for_a_sixty_second_story():
+    from pipeline.stages.script_gen import STORY_CONTRACT
+
+    assert "Between 12 and 16 scenes" in STORY_CONTRACT
+    assert "18 and 32" not in STORY_CONTRACT

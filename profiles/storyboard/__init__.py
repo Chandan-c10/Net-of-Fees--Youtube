@@ -18,6 +18,16 @@ DEFAULT_VOICE = "chandan_en"
 # Moving stills, not held stills. assemble dispatches on this.
 MOTION = "kenburns"
 
+# What the pictures look like. Read by pipeline/images.py, which falls
+# back to a photographic style when a profile says nothing -- and that
+# default fought the story contract, which was asking for a storybook
+# illustration at the same time. One source now, and it is this one.
+IMAGE_STYLE = (
+    "3D animated film still, stylised character animation, "
+    "soft global illumination, warm saturated colour, "
+    "rounded shapes, shallow depth of field"
+)
+
 HASHTAGS = (
     "#panchatantra", "#moralstories", "#storiesforkids",
     "#bedtimestories", "#kidsstories", "#shortstories",

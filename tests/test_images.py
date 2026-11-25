@@ -457,11 +457,17 @@ def story(manifest):
     return manifest
 
 
-def _serve_generated(routes, manifest) -> None:
-    """Register the pollinations route for every scene in the episode."""
+def _serve_generated(routes, manifest, profile=None) -> None:
+    """Register the pollinations route for every scene in the episode.
+
+    The profile matters: it carries IMAGE_STYLE, which is part of the
+    prompt and therefore part of the URL. Registering routes without
+    the profile the stage will use means every request 404s, which
+    reads as "no provider produced a usable picture".
+    """
     import urllib.parse
     for scene in manifest.scenes:
-        prompt = images.prompt_for(scene)
+        prompt = images.prompt_for(scene, profile)
         routes.routes["/prompt/" + urllib.parse.quote(prompt, safe="")] = (
             200, PNG, _png(768, 768))
 
@@ -603,7 +609,7 @@ def test_the_stage_fills_sources_for_a_storyboard(
     monkeypatch.delenv("IMAGE_STYLE", raising=False)
     monkeypatch.setenv("IMAGE_FETCH", "1")
     profile = profiles.load("storyboard_shorts")
-    _serve_generated(routes, story)
+    _serve_generated(routes, story, profile)
     monkeypatch.setattr(images, "_open", open_url)
     result = stage.run(episode, story, profile)
     assert len(result["made"]) == 3
