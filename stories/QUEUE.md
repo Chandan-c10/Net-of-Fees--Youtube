@@ -32,6 +32,32 @@ to keep running. Running out of titles is the one way it stops.
 - The Camel and the Jackal
 - The Three Fish
 
+## Panchatantra, second set
+
+- The Musical Donkey
+- The Cave That Talked
+- The Brahmin and the Three Thieves
+- The Bird with the Golden Droppings
+- The Elephants and the Mice
+- The Lion and the Bull
+- The Hermit and the Mouse
+- The Dog Who Went Abroad
+- The Wise Old Bird and the Fowler
+- The Heron, the Fish and the Crab
+
+## Jataka tales
+
+- The Monkey King and the Bridge
+- The Golden Goose
+- The Banyan Deer
+- The Quarrel of the Quails
+- The Ox Who Won the Wager
+- The Hare Who Thought the Earth Was Breaking
+- The Elephant and the Dog
+- The Merchant Who Sold Sawdust
+- The Parrot Who Told the Truth
+- The Woodpecker and the Lion
+
 ## Already made
 
 # The Monkey and the Crocodile
